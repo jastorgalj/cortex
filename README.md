@@ -222,13 +222,13 @@ contexto:
 | Contexto | Dónde se define |
 |---|---|
 | Servidor (`bun run dev`, producción) | variable de entorno `DATABASE_URL` del proceso; en local Prisma la lee del `.env` de la raíz (ignorado por git) |
-| `docker compose up` (servicio `server`) | `environment.DATABASE_URL` en `docker-compose.yml`, apuntando al servicio `db` |
+| `docker compose up` (servicio `server`) | `${DATABASE_URL:-…}` en `docker-compose.yml:25`: la toma del `.env` junto al compose, del entorno del shell o, si no hay ninguna, del servicio `db` (ver [Levantar con Docker Compose](#levantar-con-docker-compose)) |
 | Base local de desarrollo | servicio `db` de `docker-compose.yml`: imagen `pgvector/pgvector:pg16`, puerto host `5433` |
 | Tests | **no** se toma del `.env`: `test/preload.ts` usa un Postgres local fijo (`127.0.0.1:5433`, el del compose) y `bunfig.toml` fija `[test.env] DATABASE_URL` en `cortex_test` (ver [Desarrollo](#desarrollo)) |
 
 ```bash
 # ejemplo de URL (usuario, clave y base a gusto del entorno)
-DATABASE_URL=postgresql://cortex:knowledge_dev@127.0.0.1:5433/cortex
+DATABASE_URL=postgresql://cortex:cortex_dev@127.0.0.1:5433/cortex
 ```
 
 La migración inicial habilita `vector`, `unaccent` y `pg_trgm` (`CREATE EXTENSION IF NOT EXISTS`),
@@ -274,7 +274,8 @@ Requisitos: Bun ≥ 1.4 y un **PostgreSQL 16 con `pgvector`** (o Docker para lev
 
 ```bash
 docker compose up -d db
-# crea un .env con DATABASE_URL apuntando a esa base (el .env no se commitea)
+# crea un .env con DATABASE_URL apuntando a esa base (el .env no se commitea):
+#   cp .env.example .env  y descomentar la opción B (127.0.0.1:5433)
 bunx prisma migrate deploy
 bun install
 bun run dev
@@ -293,12 +294,91 @@ minutos); `GET /health` reporta `model_loaded`.
 
 ## Levantar con Docker Compose
 
+La instalación completa, desde un checkout limpio: dos comandos y una verificación.
+
+### Prerrequisitos
+
+- Docker Engine con Compose: el comando `docker compose` (el plugin moderno, no el viejo
+  `docker-compose`). `docker compose version` lo confirma.
+- Puertos libres en el host: **`3091`** (servidor) y **`5433`** (Postgres). Si alguno está
+  ocupado, cambiá el mapeo en `docker-compose.yml` (`ports:`) o usá un override.
+- ~2 GB de disco para las imágenes y ~420 MB del modelo ONNX, que se descarga en el primer
+  arranque y queda en el volumen `model-cache` (no se repite).
+
+### Instalación
+
 ```bash
+git clone https://github.com/jastorgalj/cortex.git cortex && cd cortex
+cp .env.example .env         # opcional: sin .env se usa el Postgres del compose
 docker compose up --build -d
 ```
 
+`up` construye la imagen, levanta `db`, espera su healthcheck, **aplica las migraciones
+pendientes** y recién entonces arranca el servidor: el `command:` del servicio (`docker-compose.yml`)
+es `sh -c "bun run db:migrate && exec bun run src/index.ts"`. El `Dockerfile` no cambia.
+El primer arranque descarga y carga el modelo, así que puede tardar unos minutos (el healthcheck
+del contenedor tiene `start_period: 120s`). Para seguir el arranque:
+
+```bash
+docker compose logs -f server
+```
+
+### Verificar
+
+```bash
+curl http://localhost:3091/health
+# -> {"status":"ok","notes":0,"model_loaded":true}
+```
+
+`200` con `"status":"ok"` es la instalación funcionando. `notes: 0` es lo esperado en una base
+recién migrada, y `model_loaded: true` confirma que el modelo ONNX ya está cargado (el servidor lo
+calienta antes de empezar a escuchar, así que la primera respuesta ya lo reporta así).
+
+### Cómo se pasa la URL de la base
+
+`DATABASE_URL` **no** está hardcodeada en el compose: el servicio `server` declara
+`${DATABASE_URL:-postgresql://…@db:5432/cortex}`, así que se puede apuntar a otra base sin editar
+ningún archivo versionado. Tres formas, en orden de precedencia:
+
+| # | Forma | Cómo |
+|---|---|---|
+| 1 (gana) | variable del shell | `DATABASE_URL=postgresql://… docker compose up -d` (o `export` antes) |
+| 2 | archivo `.env` junto al `docker-compose.yml` | `cp .env.example .env` y descomentar/editar la línea `DATABASE_URL` |
+| 3 (default) | ninguna de las anteriores | el servicio `db` del compose, por la red interna (host `db`) |
+
+El `.env` va **en la raíz del repo, al lado de `docker-compose.yml`** (compose lo busca ahí, no en
+la carpeta desde donde corrés el comando). Está ignorado por git (`.gitignore`); la plantilla
+versionada es `.env.example`, que trae ejemplos comentados: el `db` del compose, el mismo Postgres
+desde el host (`127.0.0.1:5433`, para `bun run dev`) y una base externa con `sslmode=require`.
+
+Para ver qué URL va a usar el compose **sin levantar nada**:
+
+```bash
+docker compose config | grep DATABASE_URL
+```
+
+> **`up` aplica las migraciones sobre la base que diga `DATABASE_URL`.** Antes de arrancar, el
+> contenedor corre `bun run db:migrate` (`prisma migrate deploy`). Solo aplica migraciones
+> **pendientes** y nunca baja de versión, así que repetir `up` es idempotente; pero si
+> `DATABASE_URL` apunta a una base **compartida o externa** (Neon), tu `up` la migra para todos.
+> Mientras desarrollás, apuntá a una base propia; antes de levantar contra la compartida revisá
+> qué migraciones nuevas lleva tu checkout (`git log --oneline -- prisma/migrations`).
+
+### Arranque con el sistema operativo
+
+Los dos servicios (`db` y `server`) tienen `restart: unless-stopped`: si el host se reinicia,
+vuelven a subir solos. Eso requiere que el daemon de Docker arranque con el sistema — en Linux con
+systemd:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+En macOS y Windows alcanza con activar «Start at login» de Docker Desktop (Settings → General).
+
 El modelo se guarda en el volumen `model-cache`: recrear el contenedor no pierde notas ni
-re-descarga el modelo, porque la base vive fuera del servidor.
+re-descarga el modelo, y `pgdata` conserva la base. Para borrar todo (base incluida):
+`docker compose down -v`.
 
 ## API REST de solo lectura
 
