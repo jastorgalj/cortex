@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 404" width="940" height="404" role="img" aria-label="Comparación: sin Cortex vs con Cortex">
+  <title>Sin Cortex vs con Cortex</title>
+  <rect x="0" y="0" width="940" height="404" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+
+  <text x="34" y="36" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#1f2328">Sin Cortex vs con Cortex</text>
+  <text x="34" y="56" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#59636e">Lo mismo que el agente tiene que averiguar cada vez</text>
+
+  <!-- columna izquierda -->
+  <rect x="28" y="72" width="428" height="304" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+  <path d="M28 82a10 10 0 0 1 10-10h408a10 10 0 0 1 10 10v60H28z" fill="#fdf1e7"/>
+  <text x="242" y="100" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#8a4b12">Sin Cortex</text>
+  <text x="242" y="125" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8a4b12">cada agente empieza de cero</text>
+
+  <circle cx="60" cy="176" r="4" fill="#bc8b53"/>
+  <text x="76" y="181" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">El mismo pitfall se redescubre en</text>
+  <text x="76" y="201" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">cada sesión y en cada persona.</text>
+
+  <circle cx="60" cy="244" r="4" fill="#bc8b53"/>
+  <text x="76" y="249" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">Las decisiones («por qué esto es así»)</text>
+  <text x="76" y="269" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">viven en un chat que nadie reabre.</text>
+
+  <circle cx="60" cy="312" r="4" fill="#bc8b53"/>
+  <text x="76" y="317" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">La documentación se desactualiza:</text>
+  <text x="76" y="337" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">actualizarla es un paso aparte.</text>
+
+  <!-- columna derecha -->
+  <rect x="484" y="72" width="428" height="304" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+  <path d="M484 82a10 10 0 0 1 10-10h408a10 10 0 0 1 10 10v60H484z" fill="#eaf5ee"/>
+  <text x="698" y="100" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#1a7f37">Con Cortex</text>
+  <text x="698" y="125" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1a7f37">una memoria compartida, curada</text>
+
+  <circle cx="516" cy="176" r="4" fill="#3f9a5b"/>
+  <text x="532" y="181" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">Una fuente de verdad compartida:</text>
+  <text x="532" y="201" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">todos leen y escriben el mismo servidor.</text>
+
+  <circle cx="516" cy="244" r="4" fill="#3f9a5b"/>
+  <text x="532" y="249" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">Notas curadas con autor, app y kind:</text>
+  <text x="532" y="269" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">alguien decide qué vale la pena.</text>
+
+  <circle cx="516" cy="312" r="4" fill="#3f9a5b"/>
+  <text x="532" y="317" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">Búsqueda léxica + semántica:</text>
+  <text x="532" y="337" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#1f2328">encuentra la nota sin repetir palabras.</text>
+</svg>
