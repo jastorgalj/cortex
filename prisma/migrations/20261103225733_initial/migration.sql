@@ -1,5 +1,5 @@
 -- ============================================================
--- Migración inicial — knowledge-mcp
+-- Migración inicial — Cortex
 -- SQL editado a mano (Decisión 1b y 3).
 -- Prisma genera las tablas; extensiones, trigger FTS e índices
 -- se declaran aquí manualmente.
