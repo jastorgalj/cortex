@@ -339,7 +339,11 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ id: result.id, deleted_at: result.deleted_at }, null, 2),
+              text: JSON.stringify(
+                { id: result.id, deleted_at: result.deleted_at, rev: result.rev },
+                null,
+                2,
+              ),
             },
           ],
         }
