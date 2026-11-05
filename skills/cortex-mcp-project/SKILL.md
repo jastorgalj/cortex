@@ -150,7 +150,11 @@ Smoke contra la base real: `GET /health` (`model_loaded: true`), `GET /` (200), 
 
 ## Esta skill vive en el repo
 
-El original está en `skills/cortex-mcp-project/` del repo `jastorgalj/cortex`; lo instalado en
-`~/.hermes/skills/software-development/cortex-mcp-project/` es una **copia** (Hermes no sigue symlinks
-al escanear skills). Si cambiás algo: editá acá, commit en la rama, PR, y después
-`./scripts/install-skill.sh` para que el agente lo lea.
+El original está en `skills/cortex-mcp-project/` del repo `jastorgalj/cortex`. Lo que carga el agente es
+una **copia** (el escáner de skills no sigue symlinks), instalada con `scripts/install-skill.py` en:
+
+- Hermes: `~/.hermes/skills/software-development/cortex-mcp-project`
+- Claude Code: `~/.claude/skills/cortex-mcp-project`
+
+Si cambiás algo acá: editá, commit en la rama, PR, y después corré el instalador para que el agente lo
+lea. En Windows el `~` es `%USERPROFILE%` y el intérprete puede ser `py`.

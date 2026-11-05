@@ -145,17 +145,22 @@ pidas cada vez, agrega al `CLAUDE.md` (o `AGENTS.md`) del repo algo como:
 ## La skill del repo (para el agente)
 
 Este repo trae su propia skill: `skills/cortex-mcp-project/` (reglas del proyecto, migraciones, tests,
-entrega por rama + PR, receta contra Neon). Es la fuente de verdad de cómo trabajar acá, y se instala en
-el árbol de skills del agente:
+entrega por rama + PR, receta contra Neon). Es la fuente de verdad de cómo trabajar acá, y un solo script
+la instala en el agente que uses, en Linux, macOS o Windows:
 
 ```bash
-./scripts/install-skill.sh                              # ~/.hermes/skills/software-development/
-./scripts/install-skill.sh --profiles coder,reviewer    # además en perfiles worker
+python scripts/install-skill.py                       # Hermes y Claude Code, si existen
+python scripts/install-skill.py --target hermes       # solo Hermes
+python scripts/install-skill.py --profiles coder,reviewer   # + perfiles worker de Hermes
+python scripts/install-skill.py --claude-project .    # además como skill de proyecto de Claude
 ```
 
-Va como **copia**, no como symlink: el escáner de skills de Hermes no sigue enlaces. Si editás la skill,
-commiteala y volvé a correr el script; el menú `/` del desktop usa caché, así que después hace falta
-`/reload-skills`.
+Windows: `py scripts\install-skill.py` (el `~` es `%USERPROFILE%`).
+
+Destinos: `~/.hermes/skills/software-development/cortex-mcp-project` y `~/.claude/skills/cortex-mcp-project`
+(más `<repo>/.claude/skills/…` con `--claude-project`). Va como **copia**, no como symlink: el escáner de
+skills de Hermes no sigue enlaces. Si editás la skill, commiteala y volvé a correr el script; el menú `/`
+del desktop usa caché, así que después hace falta `/reload-skills`.
 
 ### Clientes que solo hablan stdio
 
