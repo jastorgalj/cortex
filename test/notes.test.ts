@@ -274,6 +274,89 @@ describe('softDelete', () => {
   }, 60_000)
 })
 
+// ─── softDelete: revisión avanzada y recuperación ─────────────────────────────
+
+describe('softDelete — la revisión avanza y la nota recuperada se puede actualizar', () => {
+  test('borrar una nota en rev 3 → readNote is_deleted con rev 4 y ninguna revisión usa el 4', async () => {
+    const r = await createNote(prisma, {
+      title: 'Bitácora de incidentes del turno nocturno del centro de monitoreo',
+      body_md: 'El turno nocturno registra cada incidente con hora de detección, servicio afectado y responsable de la mitigación. Los incidentes críticos se escalan de inmediato al coordinador de guardia.',
+      app: 'bitacora',
+      kind: 'flujo',
+      author: 'autor-inicial',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const id = r.note.id
+
+    await updateNote(prisma, id, {
+      body_md: 'El turno nocturno registra cada incidente con hora de detección, servicio afectado, severidad y responsable de la mitigación. Los críticos se escalan al coordinador de guardia en menos de cinco minutos.',
+      author: 'autor-uno',
+    })
+    await updateNote(prisma, id, {
+      body_md: 'El turno nocturno registra cada incidente con hora de detección, servicio afectado, severidad y responsable de la mitigación. Los críticos se escalan al coordinador de guardia en menos de cinco minutos, con aviso al jefe de operaciones.',
+      author: 'autor-dos',
+    })
+
+    const before = await readNote(prisma, id)
+    expect(before.rev).toBe(3)
+
+    const result = await softDeleteNote(prisma, id, 'quien-borra', 'nota obsoleta')
+    expect(result.rev).toBe(4)
+
+    const after = await readNote(prisma, id)
+    expect(after.is_deleted).toBe(true)
+    expect(after.rev).toBe(4)
+
+    const history = await getNoteHistory(prisma, id)
+    expect(history.map((h) => h.rev)).toEqual([1, 2, 3])
+  }, 90_000)
+
+  test('regresión: borrar, recuperar y actualizar no colisiona con el PK (note_id, rev)', async () => {
+    const r = await createNote(prisma, {
+      title: 'Instructivo de respaldo diario de la base operacional del núcleo',
+      body_md: 'El respaldo diario de la base operacional se ejecuta a las 02:00 y se retiene por treinta días en almacenamiento externo con cifrado en reposo y verificación de integridad semanal.',
+      app: 'nucleo-core',
+      kind: 'sistema',
+      author: 'autor-original',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const id = r.note.id
+
+    // Una actualización → rev 2
+    await updateNote(prisma, id, {
+      body_md: 'El respaldo diario de la base operacional se ejecuta a las 01:30 y se retiene por treinta días en almacenamiento externo con cifrado en reposo y verificación de integridad semanal.',
+      author: 'autor-uno',
+    })
+
+    // Borrar: la revisión final queda en 2 y la nota avanza a 3 (el avance lo
+    // prueba el test anterior; acá solo importa que el número quede libre)
+    const deleted = await softDeleteNote(prisma, id, 'autor-borrador', 'duplicada')
+    expect(deleted.deleted_at).toBeTruthy()
+
+    // Recuperar la nota (no hay tool de restauración todavía: se limpia deleted_at)
+    await prisma.$executeRaw`UPDATE notes SET deleted_at = NULL WHERE id = ${id}`
+
+    const restored = await readNote(prisma, id)
+    expect(restored.is_deleted).toBeUndefined()
+
+    // La actualización con el base_rev de la revisión vigente funciona y deja la
+    // revisión siguiente. Con el defecto, restored.rev sigue siendo 2 (la revisión
+    // final del borrado) y el INSERT choca con el PK (note_id, rev).
+    const updated = await updateNote(prisma, id, {
+      body_md: 'El respaldo diario de la base operacional se ejecuta a las 01:30 y se retiene por cuarenta y cinco días en almacenamiento externo con cifrado en reposo y verificación de integridad semanal.',
+      author: 'autor-dos',
+      base_rev: restored.rev,
+    })
+    expect(updated.rev).toBe(4)
+    expect(updated.body_md).toContain('cuarenta y cinco días')
+
+    const history = await getNoteHistory(prisma, id)
+    expect(history.map((h) => h.rev)).toEqual([1, 2, 3])
+  }, 90_000)
+})
+
 // ─── listNotes filtros ────────────────────────────────────────────────────────
 
 describe('listNotes', () => {

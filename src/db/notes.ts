@@ -357,7 +357,14 @@ export async function softDeleteNote(
   id: string,
   author: string,
   reason: string,
-): Promise<{ id: string; deleted_at: Date }> {
+): Promise<{ id: string; deleted_at: Date; rev: number }> {
+  if (!author || author.trim() === '') {
+    throw new ValidationError('El campo author es requerido para borrar', 'author')
+  }
+  if (!reason || reason.trim() === '') {
+    throw new ValidationError('El campo reason es requerido para borrar', 'reason')
+  }
+
   return prisma.$transaction(async (tx) => {
     // Bloqueo pesimista sobre la fila; sin embed() — la transacción debe ser rápida
     const rows = await tx.$queryRaw<NoteRow[]>(
@@ -369,7 +376,8 @@ export async function softDeleteNote(
     if (!note) throw new NotFoundError(`Nota ${id} no encontrada`)
     if (note.deleted_at) throw new NotFoundError(`Nota ${id} ya está borrada`)
 
-    // Inserta revisión final con el estado vigente, el autor y el motivo del borrado
+    // Inserta revisión final con el estado vigente. La autoría es la del contenido
+    // (no la de quien borra); quién borró y por qué queda en el `reason`.
     await tx.noteRevision.create({
       data: {
         note_id: note.id,
@@ -377,15 +385,19 @@ export async function softDeleteNote(
         title: note.title,
         body_md: note.body_md,
         tags: (note.tags as string[]) ?? [],
-        author,
-        reason,
+        author: note.author,
+        reason: `${reason} (borrada por ${author})`,
       },
     })
 
-    const deleted_at = new Date()
-    await tx.note.update({ where: { id }, data: { deleted_at } })
+    // La revisión final ya ocupa `note.rev`; avanzar la nota libera ese número
+    // para la próxima actualización (PK de note_revisions es (note_id, rev)).
+    const updated = await tx.note.update({
+      where: { id },
+      data: { deleted_at: new Date(), rev: { increment: 1 } },
+    })
 
-    return { id, deleted_at }
+    return { id, deleted_at: updated.deleted_at as Date, rev: updated.rev }
   })
 }
 

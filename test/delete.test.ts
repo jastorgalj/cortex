@@ -19,6 +19,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { warmup } from '../src/db/embeddings.ts'
 import { createApp } from '../src/index.ts'
+import { softDeleteNote, ValidationError } from '../src/db/notes.ts'
 
 const TEST_PORT = 13093
 const BASE_URL = `http://localhost:${TEST_PORT}`
@@ -168,7 +169,7 @@ describe('cortex_delete — validación de parámetros', () => {
 // ─── Tests — borrado exitoso y rastro en historial ────────────────────────────
 
 describe('cortex_delete — borrado lógico con rastro en historial', () => {
-  test('nota con 2 revisiones → history tiene 3 revs, la última tiene author=maria y reason', async () => {
+  test('nota con 2 revisiones → history tiene 3 revs, la última conserva el autor del contenido y registra a quien borró', async () => {
     const client = makeClient()
     await connectClient(client)
 
@@ -210,9 +211,11 @@ describe('cortex_delete — borrado lógico con rastro en historial', () => {
       arguments: { id: noteId, author: 'maria', reason: 'duplicada de otra nota' },
     })
     expect((deleteResult as { isError?: boolean }).isError).toBeFalsy()
-    const deleteData = parseToolResult(deleteResult) as { id: string; deleted_at: string }
+    const deleteData = parseToolResult(deleteResult) as { id: string; deleted_at: string; rev: number }
     expect(deleteData.id).toBe(noteId)
     expect(deleteData.deleted_at).toBeTruthy()
+    // La respuesta informa la revisión en que quedó la nota borrada (3 + 1)
+    expect(deleteData.rev).toBe(4)
 
     // cortex_history devuelve 3 revisiones con números 1, 2, 3 sin repetir
     const histPost = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
@@ -222,10 +225,12 @@ describe('cortex_delete — borrado lógico con rastro en historial', () => {
     const revNums = histPostData.map((r) => r.rev)
     expect(revNums).toEqual([1, 2, 3]) // sin repetir, ascendente
 
-    // La última revisión (rev=3) tiene author=maria y reason correcto
+    // La última revisión (rev=3) conserva el autor del contenido vigente (editor-dos),
+    // no el de quien borró; y el reason incluye el motivo recibido y a quien borró.
     const lastRev = histPostData[2]!
-    expect(lastRev.author).toBe('maria')
-    expect(lastRev.reason).toBe('duplicada de otra nota')
+    expect(lastRev.author).toBe('editor-dos')
+    expect(lastRev.reason).toContain('duplicada de otra nota')
+    expect(lastRev.reason).toContain('maria')
     // Y el body_md que tenía la nota antes del borrado
     expect(lastRev.body_md).toContain('Estado final antes del borrado')
 
@@ -310,6 +315,46 @@ describe('cortex_delete — id inexistente o ya borrado', () => {
     const histPost = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
     const histPostData = parseToolResult(histPost) as Array<unknown>
     expect(histPostData.length).toBe(1)
+
+    await client.close()
+  })
+})
+
+// ─── Tests — validación en la capa de datos ───────────────────────────────────
+
+describe('softDeleteNote — validación en la capa de datos (sin la tool)', () => {
+  test('author vacío o en blanco → ValidationError que nombra el campo, nota sigue en cortex_list', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const noteId = await createTestNote(client, '-db-validation')
+
+    for (const author of ['', '   ']) {
+      const caught = await softDeleteNote(prisma, noteId, author, 'motivo válido').then(
+        () => null,
+        (err: unknown) => err,
+      )
+      expect(caught).toBeInstanceOf(ValidationError)
+      expect((caught as ValidationError).field).toBe('author')
+    }
+
+    // Sin `reason` tampoco se borra
+    for (const reason of ['', '   ']) {
+      const caught = await softDeleteNote(prisma, noteId, 'tester', reason).then(
+        () => null,
+        (err: unknown) => err,
+      )
+      expect(caught).toBeInstanceOf(ValidationError)
+      expect((caught as ValidationError).field).toBe('reason')
+    }
+
+    // La nota sigue visible en cortex_list y sin revisión de borrado
+    const listResult = await client.callTool({ name: 'cortex_list', arguments: {} })
+    const listData = parseToolResult(listResult) as Array<{ id: string }>
+    expect(listData.map((n) => n.id)).toContain(noteId)
+
+    const histResult = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
+    expect((parseToolResult(histResult) as Array<unknown>).length).toBe(0)
 
     await client.close()
   })
