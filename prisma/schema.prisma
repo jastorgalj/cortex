@@ -27,6 +27,14 @@ model Note {
 
   revisions  NoteRevision[]
 
+  // Índices declarados también en el SQL de la migración. Sin estas líneas,
+  // `prisma migrate dev` interpreta que los índices sobran y propone migraciones
+  // que los borran (incluido el GIN de la búsqueda de texto).
+  // El índice HNSW del embedding y el parcial de deleted_at no se pueden expresar
+  // en el datamodel: quedan solo en el SQL de la migración.
+  @@index([app], map: "notes_app_idx")
+  @@index([kind], map: "notes_kind_idx")
+  @@index([fts], type: Gin, map: "notes_fts_gin")
   @@map("notes")
 }
 

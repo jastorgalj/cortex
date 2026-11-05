@@ -254,6 +254,12 @@ bun install
 bun run dev
 ```
 
+> **Aplicá migraciones con `migrate deploy`, no con `migrate dev`.** Las migraciones incluyen SQL a
+> mano que el datamodel no puede expresar (índice HNSW del embedding e índice parcial de
+> `deleted_at`). `migrate dev` vuelve a diffear contra el datamodel y, si le das un nombre, escribe
+> una migración que **borra** esos objetos. Para una migración nueva: escribí el SQL en
+> `prisma/migrations/<timestamp>_<nombre>/migration.sql` y aplicalo con `migrate deploy`.
+
 El servidor queda en `http://localhost:3091`. Variables: `DATABASE_URL` (obligatoria), `PORT`
 (por defecto 3091) y `MODEL_CACHE_DIR` (opcional: dónde se guarda el modelo ONNX; por defecto
 `~/.model-cache/knowledge-mcp`). El primer arranque descarga y carga el modelo (puede tardar unos
