@@ -168,6 +168,21 @@ Destinos: `~/.hermes/skills/<categoría>/<skill>` y `~/.claude/skills/<skill>` (
 skills de Hermes no sigue enlaces. Si editás una skill, commiteala y volvé a correr el script; el menú `/`
 del desktop usa caché, así que después hace falta `/reload-skills`.
 
+### Instalar la skill sin clonar
+
+Sin tener el repo clonado, el instalador se baja solo y baja el árbol completo de `skills/` desde
+GitHub antes de instalar:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jastorgalj/cortex/main/scripts/install-skill.py \
+  -o /tmp/install-cortex-skill.py && python /tmp/install-cortex-skill.py
+```
+
+Instala las dos skills —`cortex-mcp` y `cortex-mcp-project` **completa** (incluido su
+`scripts/verify-initial-migration.sh`)— en `~/.hermes/skills/` y `~/.claude/skills/`. El comando
+apunta a `main`: publicá ahí la versión que quieras distribuir. Para no tocar las skills reales al
+probar, pasá `--hermes-home` y `--claude-home`.
+
 ### Clientes que solo hablan stdio
 
 Si algún cliente no soporta HTTP streamable, un puente lo resuelve:
@@ -292,6 +307,65 @@ El servidor queda en `http://localhost:3091`. Variables: `DATABASE_URL` (obligat
 `~/.model-cache/knowledge-mcp`). El primer arranque descarga y carga el modelo (puede tardar unos
 minutos); `GET /health` reporta `model_loaded`.
 
+## Descargar la imagen (sin clonar el repo)
+
+La imagen está publicada en GHCR: `ghcr.io/jastorgalj/cortex`. Bajala, pasá la URL de la base y
+arrancá, sin clonar el repo ni editar archivos versionados:
+
+```bash
+docker pull ghcr.io/jastorgalj/cortex:latest
+
+docker run -d --name cortex -p 3091:3091 \
+  -e DATABASE_URL="postgresql://usuario:clave@host:5432/cortex" \
+  -v cortex-model-cache:/app/.model-cache \
+  --restart unless-stopped \
+  ghcr.io/jastorgalj/cortex:latest
+```
+
+Verificación:
+
+```bash
+curl http://localhost:3091/health
+# -> {"status":"ok","notes":0,"model_loaded":true}
+```
+
+`200` con `"status":"ok"` es el servidor funcionando; `notes: 0` es lo esperado en una base recién
+migrada y `model_loaded: true` confirma el modelo ONNX cargado.
+
+> **El arranque migra la base a la que apunte `DATABASE_URL`.** Antes de servir, el contenedor
+> corre `bun run db:migrate` (`prisma migrate deploy`): aplica las migraciones **pendientes** y
+> nunca baja de versión (repetir el arranque es idempotente). Si `DATABASE_URL` apunta a una base
+> **compartida o externa**, la migra para todos. El destino necesita **PostgreSQL 16 con pgvector**
+> (extensiones `vector`, `unaccent` y `pg_trgm`). El primer arranque descarga ~420 MB del modelo
+> ONNX al volumen `cortex-model-cache` (no se repite).
+
+### Arquitectura y fallos esperados
+
+La imagen se publica **solo para `linux/amd64`**. En un host `arm64` (Mac con Apple Silicon) el
+`docker pull` funciona y el contenedor corre **emulado** —Docker Desktop lo avisa—: sirve para probar, no
+para producción. Publicar `arm64` está pendiente.
+
+Si el arranque no puede trabajar, el contenedor **sale con código ≠ 0 y lo dice** en vez de quedarse a
+medias:
+
+| Situación | Qué ves en `docker logs cortex` |
+|---|---|
+| Falta `DATABASE_URL` | `error: DATABASE_URL no está definida.` y el ejemplo del `-e` |
+| URL inalcanzable, sin permisos o sin `pgvector` | `error: no se pudieron aplicar las migraciones.` y «Revisá DATABASE_URL: debe apuntar a un PostgreSQL 16 con pgvector accesible» |
+
+### Publicar la imagen (paso de Juan)
+
+La imagen se publica con un workflow de GitHub Actions que se dispara con un tag
+(`git tag v0.2.0 && git push --tags`). El package de GHCR **nace privado** por defecto, incluso en
+un repo público: tras el primer push del tag, hay que hacerlo público **una sola vez** para que el
+`docker pull` anónimo funcione:
+
+```bash
+gh api -X PATCH /user/packages/container/cortex -f visibility=public
+```
+
+Sin ese paso, `docker pull ghcr.io/jastorgalj/cortex:latest` responde 401.
+
 ## Levantar con Docker Compose
 
 La instalación completa, desde un checkout limpio: dos comandos y una verificación.
@@ -314,10 +388,11 @@ docker compose up --build -d
 ```
 
 `up` construye la imagen, levanta `db`, espera su healthcheck, **aplica las migraciones
-pendientes** y recién entonces arranca el servidor: el `command:` del servicio (`docker-compose.yml`)
-es `sh -c "bun run db:migrate && exec bun run src/index.ts"`. El `Dockerfile` no cambia.
-El primer arranque descarga y carga el modelo, así que puede tardar unos minutos (el healthcheck
-del contenedor tiene `start_period: 120s`). Para seguir el arranque:
+pendientes** y recién entonces arranca el servidor: las migraciones corren en el **entrypoint de la
+imagen** (`docker-entrypoint.sh`, `bun run db:migrate`), así que no hace falta `command:` en el
+compose y un `docker run` simple queda autosuficiente. El primer arranque descarga y carga el
+modelo, así que puede tardar unos minutos (el healthcheck del contenedor tiene `start_period: 300s`).
+Para seguir el arranque:
 
 ```bash
 docker compose logs -f server

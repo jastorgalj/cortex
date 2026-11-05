@@ -10,7 +10,9 @@ Este repo trae dos skills, con audiencias distintas:
 
 La fuente de verdad es `skills/` de ESTE repo: si editás una skill, commiteá y
 volvé a correr este script. La instalación es una copia —el escáner de skills de
-Hermes no sigue symlinks— así que los cambios no viajan solos.
+Hermes no sigue symlinks— así que los cambios no viajan solos. Si corrés el script
+**fuera de un checkout** (solo el `install-skill.py` suelto), baja el árbol completo
+de `skills/` desde GitHub antes de instalar.
 
 Destinos:
   Hermes   ~/.hermes/skills/<categoria>/<skill>  (+ profiles/<perfil>/skills/... con --profiles)
@@ -21,14 +23,22 @@ Ejemplos:
   python scripts/install-skill.py --skills cortex-mcp    # solo la de uso del MCP
   python scripts/install-skill.py --target hermes --profiles coder,reviewer
   py scripts\\install-skill.py                           # Windows
+
+Sin clonar el repo (el script se baja de GitHub y baja el árbol de skills solo):
+  curl -fsSL https://raw.githubusercontent.com/jastorgalj/cortex/main/scripts/install-skill.py \
+    -o /tmp/install-cortex-skill.py && python /tmp/install-cortex-skill.py
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # skill -> categoría en el árbol de Hermes
@@ -37,6 +47,55 @@ SKILLS = {
     "cortex-mcp-project": "software-development",
 }
 REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Sin checkout, la skill se baja de GitHub (árbol completo, no solo el SKILL.md).
+RAW_BASE = "https://raw.githubusercontent.com/jastorgalj/cortex/main"
+GIT_TREES_URL = "https://api.github.com/repos/jastorgalj/cortex/git/trees/main?recursive=1"
+
+
+def _fetch(url: str) -> bytes:
+    """GET de una URL pública de GitHub (raw o API)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "cortex-install-skill"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read()
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        raise SystemExit(
+            f"no pude bajar {url} desde GitHub: {exc}.\n"
+            "revisá tu conexión a internet; si usás la API de GitHub sin token,\n"
+            "recordá el límite de 60 requests/hora por IP."
+        )
+
+
+def _skill_files(skill: str) -> list[str]:
+    """Enumera los blobs de skills/<skill>/ en la rama main (vía la API de GitHub)."""
+    prefix = f"skills/{skill}/"
+    tree = json.loads(_fetch(GIT_TREES_URL).decode("utf-8"))
+    return [
+        item["path"]
+        for item in tree.get("tree", [])
+        if item.get("type") == "blob" and item["path"].startswith(prefix)
+    ]
+
+
+def source_dir(skill: str) -> Path:
+    """Directorio fuente de la skill: el checkout si existe; si no, un temp descargado.
+
+    Sin checkout, `REPO_DIR/skills` no existe: se descarga el árbol completo de la skill
+    desde raw.githubusercontent.com (incluye scripts/..., no solo el SKILL.md)."""
+    src = REPO_DIR / "skills" / skill
+    if (src / "SKILL.md").is_file():
+        return src
+    files = _skill_files(skill)
+    if not files:
+        raise SystemExit(f"no encuentro skills/{skill}/ ni en el repo ni en GitHub")
+    tmp = Path(tempfile.mkdtemp(prefix="cortex-skill-")) / skill
+    for path in files:
+        rel = path[len(f"skills/{skill}/"):]
+        target = tmp / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(_fetch(f"{RAW_BASE}/{path}"))
+    return tmp
 
 
 def home() -> Path:
@@ -49,7 +108,7 @@ def sha(path: Path) -> str:
 
 
 def install(skill: str, dest: Path) -> Path:
-    src = REPO_DIR / "skills" / skill
+    src = source_dir(skill)
     if not (src / "SKILL.md").is_file():
         raise SystemExit(f"no encuentro {src}/SKILL.md")
     if dest.exists():

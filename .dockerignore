@@ -1,0 +1,14 @@
+# Higiene del contexto de build: nada de secretos, git, ni artefactos locales.
+.env
+.env.*
+.git
+.gitignore
+.gitmodules
+node_modules
+dist
+test
+skills
+*.log
+.worktrees
+model-cache
+.bitacora
