@@ -142,6 +142,21 @@ pidas cada vez, agrega al `CLAUDE.md` (o `AGENTS.md`) del repo algo como:
 - Si ya existe una nota sobre eso, actualízala con `cortex_update` en vez de crear otra.
 ```
 
+## La skill del repo (para el agente)
+
+Este repo trae su propia skill: `skills/cortex-mcp-project/` (reglas del proyecto, migraciones, tests,
+entrega por rama + PR, receta contra Neon). Es la fuente de verdad de cómo trabajar acá, y se instala en
+el árbol de skills del agente:
+
+```bash
+./scripts/install-skill.sh                              # ~/.hermes/skills/software-development/
+./scripts/install-skill.sh --profiles coder,reviewer    # además en perfiles worker
+```
+
+Va como **copia**, no como symlink: el escáner de skills de Hermes no sigue enlaces. Si editás la skill,
+commiteala y volvé a correr el script; el menú `/` del desktop usa caché, así que después hace falta
+`/reload-skills`.
+
 ### Clientes que solo hablan stdio
 
 Si algún cliente no soporta HTTP streamable, un puente lo resuelve:
