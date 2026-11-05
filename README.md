@@ -434,3 +434,22 @@ decisiones de cada cambio.
 - Autenticación y permisos por usuario.
 - Captura automática de lo que ocurre en una sesión: Cortex guarda lo que alguien decide
   guardar. Otra herramienta podría alimentarlo, pero no es su función.
+
+## Licencia
+
+**Apache License 2.0** — ver [LICENSE](LICENSE). Copyright 2026 Juan Astorga.
+
+Es una licencia permisiva (se puede usar, modificar y redistribuir, incluso comercialmente), con dos
+cosas que la diferencian de MIT y que conviene tener claras antes de contribuir:
+
+- **Concesión de patentes explícita** (sección 3): quien contribuye cede también sus patentes sobre
+  lo aportado, y quien demande por patentes sobre el proyecto pierde la licencia.
+- **Aviso de cambios y de copyright** (secciones 4 y 5): al redistribuir hay que conservar `LICENSE`,
+  los avisos de copyright y —si existiera— un `NOTICE`, y marcar que se modificaron los archivos.
+
+Las contribuciones se reciben bajo la misma licencia: quien abre un PR acepta que su aporte se
+distribuya con Apache 2.0.
+
+Las dependencias son compatibles (MIT, Apache 2.0 e ISC). El modelo de embeddings
+(`all-mpnet-base-v2`) **no** se redistribuye: se descarga en tiempo de ejecución y conserva su propia
+licencia.
