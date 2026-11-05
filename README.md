@@ -198,7 +198,7 @@ contexto:
 | Servidor (`bun run dev`, producción) | variable de entorno `DATABASE_URL` del proceso; en local Prisma la lee del `.env` de la raíz (ignorado por git) |
 | `docker compose up` (servicio `server`) | `environment.DATABASE_URL` en `docker-compose.yml`, apuntando al servicio `db` |
 | Base local de desarrollo | servicio `db` de `docker-compose.yml`: imagen `pgvector/pgvector:pg16`, puerto host `5433` |
-| Tests | `bunfig.toml` → `[test.env] DATABASE_URL`, apuntando a `cortex_test` (ver [Desarrollo](#desarrollo)) |
+| Tests | **no** se toma del `.env`: `test/preload.ts` usa un Postgres local fijo (`127.0.0.1:5433`, el del compose) y `bunfig.toml` fija `[test.env] DATABASE_URL` en `cortex_test` (ver [Desarrollo](#desarrollo)) |
 
 ```bash
 # ejemplo de URL (usuario, clave y base a gusto del entorno)
@@ -236,8 +236,9 @@ para que dos escrituras simultáneas no se pisen ni se pierdan datos:
   con las candidatas (similitud ≥ `DUPLICATE_THRESHOLD`, 0.55); crear igual requiere `force: true`.
   No hay locks de “nombre único” ni fusiones automáticas: dos agentes pueden crear notas parecidas y
   el humano decide.
-- **Los tests no tocan la base compartida.** `bunfig.toml` inyecta un `DATABASE_URL` de test y
-  `test/preload.ts` crea y migra `cortex_test` antes de correr: `bun test` nunca hace TRUNCATE ni
+- **Los tests no tocan la base compartida.** `test/preload.ts` apunta siempre a un Postgres local
+  (`cortex_test` en `127.0.0.1:5433`) y **no lee el `DATABASE_URL` del `.env`**, así que poner una URL
+  remota (Neon) en el `.env` no hace que `bun test` escriba ahí: `bun test` nunca hace TRUNCATE ni
   escrituras sobre las notas reales.
 
 ## Levantar en desarrollo
@@ -306,9 +307,10 @@ bun test                 # suite completa
 bun run typecheck        # tsc --noEmit
 ```
 
-> **Los tests usan la base `cortex_test`, nunca `cortex` ni Neon.** `bunfig.toml`
-> inyecta un `DATABASE_URL` separado y `test/preload.ts` crea esa base y aplica las migraciones
-> si no existen. Las notas reales quedan intactas al correr `bun test`.
+> **Los tests usan la base `cortex_test`, nunca `cortex` ni Neon.** `test/preload.ts` crea esa base en
+> el Postgres local del compose y aplica las migraciones si no existen; la URL de test **no se deriva
+> del `.env`** (se puede sobreescribir con `TEST_DATABASE_URL` en el shell si usas otro puerto). Las
+> notas reales quedan intactas al correr `bun test`.
 
 Los cambios se especifican con OpenSpec antes de implementarse: `openspec/specs/` describe el
 comportamiento vigente (el contrato) y `openspec/changes/archive/` guarda el historial de

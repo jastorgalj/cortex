@@ -1,56 +1,29 @@
 /**
  * test/preload.ts — Preload ejecutado por Bun antes de cada archivo de test.
  *
- * Garantía estructural: los tests usan la DB `cortex_test`, nunca `cortex`.
+ * Garantía estructural: los tests usan SIEMPRE una DB local (`cortex_test`), nunca la
+ * base del `.env` (que puede apuntar a Neon) ni la base de desarrollo compartida.
  * Este script:
  *   1. Crea `cortex_test` si no existe (idempotente — ignora "already exists").
  *   2. Aplica las migraciones Prisma contra `cortex_test` (no-op si ya aplicadas).
  *
- * No depende de variables de entorno inyectadas por [test.env] porque el preload
- * se ejecuta antes de que Bun inyecte esas variables. Lee .env directamente para
- * obtener la URL de la DB principal y deriva la URL de test reemplazando el DB name.
+ * La URL de test NO se deriva del `.env`: si el `.env` apunta a un Postgres remoto
+ * (Neon u otro), los tests jamás deben escribir ahí. Host/puerto/credenciales salen de
+ * constantes locales (las mismas del servicio `db` de docker-compose) y se pueden
+ * sobreescribir con `TEST_DATABASE_URL` en el entorno del shell.
  */
 
 import { SQL } from 'bun'
-import { readFileSync } from 'fs'
-import { join } from 'path'
 
-// ── 0. Leer la URL de la DB principal desde .env ─────────────────────────────
+// ── 0. URL de la base de test (siempre local) ───────────────────────────────
 
-function readDotEnv(): Record<string, string> {
-  try {
-    const envPath = join(process.cwd(), '.env')
-    const content = readFileSync(envPath, 'utf8')
-    const result: Record<string, string> = {}
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const eq = trimmed.indexOf('=')
-      if (eq === -1) continue
-      result[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
-    }
-    return result
-  } catch {
-    return {}
-  }
-}
+/** Host local del Postgres de docker-compose, sin el nombre de la base. */
+const LOCAL_HOST_URL = process.env.TEST_DATABASE_URL ?? 'postgresql://cortex:cortex_dev@127.0.0.1:5433'
 
-const dotEnv = readDotEnv()
-// URL de la DB de desarrollo (apunta a cortex)
-const adminUrl = dotEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? ''
-if (!adminUrl) {
-  console.error('[preload] DATABASE_URL no encontrado en .env')
-  process.exit(1)
-}
-
-// URL de la DB de test: mismo host/user/pass, distinto DB name
 const TEST_DB = 'cortex_test'
-const urlParts = adminUrl.match(/^(postgresql:\/\/.+@[^/]+\/)([^?]+)(.*)$/)
-if (!urlParts) {
-  console.error('[preload] No se pudo parsear DATABASE_URL:', adminUrl)
-  process.exit(1)
-}
-const testUrl = `${urlParts[1]}${TEST_DB}${urlParts[3]}`
+// La base de mantenimiento existe siempre; se usa para poder crear `cortex_test`.
+const adminUrl = `${LOCAL_HOST_URL}/postgres`
+const testUrl = `${LOCAL_HOST_URL}/${TEST_DB}`
 
 // Inyectar DATABASE_URL de test en el proceso actual para que PrismaClient
 // en los archivos de test use cortex_test (complementa [test.env] en bunfig.toml)
