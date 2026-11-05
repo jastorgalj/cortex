@@ -18,7 +18,7 @@ Cualquier tarea en `~/develop/varios/cortex` (repo `jastorgalj/cortex`): cambios
 migraciones Prisma, tests, documentación OpenSpec o configuración de la base (local o Neon).
 
 Proyecto **personal** del usuario (no de TGT/Deta). Repo local `~/develop/varios/cortex`,
-remoto privado `https://github.com/jastorgalj/cortex` (cuenta personal, NO `tgtjam`).
+remoto `https://github.com/jastorgalj/cortex` (público, cuenta personal, NO `tgtjam`).
 Stack: Bun + Elysia + Prisma + Postgres 16 con `pgvector` (embeddings ONNX locales).
 
 ## Entrega: rama + PR, nunca push a `main`
@@ -45,10 +45,10 @@ usarlo: `GH_TOKEN="$(gh auth token --user jastorgalj)" gh api user -q .login` �
 Los tests de un worktree nuevo necesitan `bun i` (no comparte `node_modules`) y el Postgres local
 `cortex_test` en `127.0.0.1:5433`; no leen el `.env`.
 
-**Card de kanban con PR: `completion_contract="local-only"`.** El repo es privado del plan gratuito y no
-tiene `.github/workflows`: el gate `OWNER/REPO` consulta `rules/branches/main` y branch protection, que
-responden 403 («Upgrade to GitHub Pro»), asi que bloquea la card con el trabajo ya hecho. El PR se abre
-igual; lo que cambia es la compuerta de cierre.
+**Card de kanban con PR: `completion_contract="local-only"`.** El repo es **público** y tiene rulesets
+(PR obligatorio), pero **no tiene required status checks**: el workflow `.github/workflows/publish.yml`
+publica en tag y no valida PRs. Con `OWNER/REPO` el gate espera checks que no existen y bloquea la card
+con el trabajo ya hecho. El PR se abre igual; lo que cambia es la compuerta de cierre.
 
 ## Reglas que no se pueden romper
 
@@ -131,7 +131,7 @@ umbral de deduplicación. Reglas:
 
 ```bash
 export PATH="$HOME/.bun/bin:$PATH" && cd ~/develop/varios/cortex
-bun run typecheck && bun test          # 63 tests
+bun run typecheck && bun test          # 66 tests (baseline ago-2026)
 # drift contra la base real:
 bunx prisma migrate diff --from-url "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" \
   --to-schema-datamodel prisma/schema.prisma --script            # "empty migration"
@@ -147,6 +147,30 @@ Prisma pierde `vector`, el HNSW, el índice parcial y el trigger FTS.
 
 Smoke contra la base real: `GET /health` (`model_loaded: true`), `GET /` (200), MCP
 `initialize` + `tools/list` (7 tools `cortex_*`). Las tools usan `q`, no `query`.
+
+## Distribución: imagen publicada y skill sin clonar
+
+- **Publicación**: `.github/workflows/publish.yml` corre en tag `v*` con `GITHUB_TOKEN`
+  (`permissions: packages: write`) y publica `ghcr.io/jastorgalj/cortex` con `:latest` y `:<version>`.
+  **La dispara el usuario** (`git tag vX && git push --tags`): ninguna card publica, tagea ni pushea imagen.
+- **Guarda de versión**: el workflow compara `${REF_NAME#v}` con `package.json#version` y falla si
+  difieren. Para publicar hay que taguear la versión que dice `package.json`, no al revés.
+- **Solo `linux/amd64`**: `docker buildx build --platform linux/arm64` no compila en este host (falta
+  QEMU binfmt, «exec format error»), así que arm64 sigue pendiente. En Mac Apple Silicon la imagen corre
+  emulada.
+- **El package de GHCR nace privado**, incluso en repo público: tras el primer push hay que hacerlo
+  público una vez (`gh api -X PATCH /user/packages/container/cortex -f visibility=public`). El token de
+  `gh auth token` no tiene `read:packages`, así que `gh api users/<u>/packages` responde 403 y **no sirve**
+  para verificar si ya está publicado.
+- **La migración vive en el entrypoint** (`docker-entrypoint.sh`), no en el `command:` del compose: un
+  `docker run -e DATABASE_URL=…` es autosuficiente y falla rápido si la base no sirve.
+- **Validar el workflow con `bun`**, no con `python3`: el Python del host no tiene el módulo `yaml` ni pip.
+  `bun -e 'console.log(require("yaml").parse(require("fs").readFileSync(".github/workflows/publish.yml","utf8")))'`
+- **El `.env` del repo apunta a Neon**: un `docker compose up` desde un worktree migra esa base. Para
+  probar compose, usá proyecto aislado (`-p <nombre>`) y un override con `DATABASE_URL` al `db` propio.
+- **El merge de compose concatena listas** (`ports`): un override que reemplaza puertos necesita la
+  etiqueta `!override`; si no, quedan `5433` y `5434` juntos y choca con `cortex-db-test`.
+- Las cards no pueden `docker restart <contenedor>` (BLOCKED): se recrea con `docker rm -f` + `docker run`.
 
 ## Esta skill vive en el repo
 

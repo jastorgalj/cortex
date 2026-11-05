@@ -339,6 +339,20 @@ migrada y `model_loaded: true` confirma el modelo ONNX cargado.
 > (extensiones `vector`, `unaccent` y `pg_trgm`). El primer arranque descarga ~420 MB del modelo
 > ONNX al volumen `cortex-model-cache` (no se repite).
 
+### Arquitectura y fallos esperados
+
+La imagen se publica **solo para `linux/amd64`**. En un host `arm64` (Mac con Apple Silicon) el
+`docker pull` funciona y el contenedor corre **emulado** —Docker Desktop lo avisa—: sirve para probar, no
+para producción. Publicar `arm64` está pendiente.
+
+Si el arranque no puede trabajar, el contenedor **sale con código ≠ 0 y lo dice** en vez de quedarse a
+medias:
+
+| Situación | Qué ves en `docker logs cortex` |
+|---|---|
+| Falta `DATABASE_URL` | `error: DATABASE_URL no está definida.` y el ejemplo del `-e` |
+| URL inalcanzable, sin permisos o sin `pgvector` | `error: no se pudieron aplicar las migraciones.` y «Revisá DATABASE_URL: debe apuntar a un PostgreSQL 16 con pgvector accesible» |
+
 ### Publicar la imagen (paso de Juan)
 
 La imagen se publica con un workflow de GitHub Actions que se dispara con un tag
