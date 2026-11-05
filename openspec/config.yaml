@@ -1,0 +1,15 @@
+schema: spec-driven
+
+context: |
+  novara-knowledge-mcp: servidor MCP central de conocimiento para el equipo de
+  desarrollo de NOVARA (5-10 personas y sus agentes).
+  Stack: TypeScript + Bun + Elysia. Persistencia: PostgreSQL 16 con pgvector y
+  full-text en espanol (tsvector + unaccent), provider-agnostico: deploy inicial
+  en una base propia del proyecto en Neon (free tier), migracion futura a otro
+  Postgres via pg_dump/pg_restore + cambio de DATABASE_URL. Dev y tests contra un Postgres
+  local con pgvector en docker-compose. Sin autenticacion: el servidor vive
+  en red interna/VPN; la autoria es declarativa (campo author en cada escritura).
+  Sin git: el versionado es una tabla de revisiones append-only en la DB.
+  Reemplaza el flujo anterior de knowledge repo git (novara-knowledge +
+  bitacora note --team), cuya sincronizacion distribuida genero choques con el flujo
+  git del equipo. Todos los artifacts se escriben en espanol.

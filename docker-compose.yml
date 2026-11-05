@@ -1,0 +1,46 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: cortex
+      POSTGRES_USER: cortex
+      POSTGRES_PASSWORD: cortex_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cortex -d cortex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: .
+    ports:
+      - "3091:3091"
+    environment:
+      DATABASE_URL: postgresql://cortex:cortex_dev@db:5432/cortex
+      PORT: 3091
+      NODE_ENV: production
+    volumes:
+      - model-cache:/app/.model-cache
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Sonda nativa de Bun: oven/bun:latest no trae wget ni curl
+      test:
+        - CMD
+        - bun
+        - "-e"
+        - 'fetch("http://localhost:3091/health").then(async (r) => { const j = await r.json().catch(() => ({})); process.exit(r.ok && j.status === "ok" ? 0 : 1) }).catch(() => process.exit(1))'
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  model-cache:

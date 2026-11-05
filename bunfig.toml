@@ -1,0 +1,9 @@
+[test]
+timeout = 300000
+preload = ["./test/preload.ts"]
+
+[test.env]
+# DB de test separada — los tests NUNCA tocan cortex (la DB principal).
+# preload.ts lee .env directamente para obtener la URL admin y deriva la URL de test.
+# Esta variable sobrescribe DATABASE_URL en los workers de test (complementa preload).
+DATABASE_URL = "postgresql://cortex:knowledge_dev@127.0.0.1:5433/cortex_test"
