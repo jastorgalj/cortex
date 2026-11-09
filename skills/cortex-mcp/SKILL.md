@@ -1,7 +1,7 @@
 ---
 name: cortex-mcp
 description: "Use when usás Cortex (MCP) para buscar o guardar notas."
-version: 1.0.0
+version: 1.1.0
 author: juan-hermes
 license: MIT
 metadata:
@@ -40,14 +40,20 @@ Una nota está mal o sobra    → cortex_delete (author + reason)
 Buscar es parte de empezar, no un extra: una tarea resuelta dos veces porque nadie buscó es el costo que
 Cortex evita.
 
+## La convención vigente
+
+Las llaves de sistema, los cinco tipos con su esqueleto y las reglas de título, tags y granularidad viven
+en Cortex, no en esta skill: `cortex_list(app: "general", kind: "regla")`. Leela antes de escribir la
+primera nota de un sistema; si algo no encaja en los cinco tipos, se propone por issue, no se inventa.
+
 ## La nota
 
 | Campo | Qué es |
 |---|---|
 | `title`, `body_md` | Título corto y contenido en Markdown |
-| `app` | Sistema al que pertenece: el repo o el dominio (`cartera`, `huella`, `console`, `general`…) |
-| `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` u `otro` |
-| `tags` | Libres; los `origen:` los reserva el importador |
+| `app` | Llave del sistema: el producto (`console`, `omnisales-pos`, `licitapro`, `general`…) |
+| `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` — cinco, sin `otro` |
+| `tags` | Con prefijo: `area:`, `repo:`, `stack:`, `env:` (los valores, en la nota de convención); `origen:` lo reserva el importador |
 | `author` | Quién escribe (**obligatorio** en toda escritura) |
 | `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) |
 

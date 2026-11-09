@@ -25,6 +25,7 @@ import {
   ConflictError,
 } from '../src/db/notes.ts'
 import { warmup } from '../src/db/embeddings.ts'
+import { NOTE_KINDS, type NoteKind } from '../src/db/constants.ts'
 
 const prisma = new PrismaClient()
 
@@ -107,6 +108,32 @@ describe('createNote', () => {
     expect(e.message).toContain('nota-rapida')
     expect(e.message).toContain('sistema')
     expect(e.message).toContain('pitfall')
+  }, 60_000)
+
+  test("rechaza kind 'otro' — el mensaje lista los cinco tipos válidos y no crea ninguna nota", async () => {
+    const before = await prisma.note.count()
+    let caughtErr: unknown = null
+    try {
+      await createNote(prisma, {
+        title: `Nota con el tipo retirado ${Date.now()}`,
+        body_md: 'Cuerpo de una nota que declara el tipo «otro», que dejó de ser un valor válido.',
+        app: 'general',
+        kind: 'otro',
+        author: 'tester',
+        force: true,
+      })
+    } catch (err) {
+      caughtErr = err
+    }
+    expect(caughtErr).toBeInstanceOf(ValidationError)
+    const e = caughtErr as ValidationError
+    expect(e.field).toBe('kind')
+    // Los valores válidos son exactamente los cinco tipos: `otro` no está en la lista
+    expect(NOTE_KINDS).toHaveLength(5)
+    expect(NOTE_KINDS).not.toContain('otro')
+    expect(e.message).toContain(`Valores válidos: ${NOTE_KINDS.join(', ')}`)
+    // No se creó ninguna nota
+    expect(await prisma.note.count()).toBe(before)
   }, 60_000)
 })
 
@@ -217,7 +244,7 @@ describe('updateNote', () => {
       title: 'Concurrencia sobre una nota compartida',
       body_md: 'Cuerpo inicial de la nota que van a actualizar dos procesos a la vez.',
       app: 'general',
-      kind: 'otro',
+      kind: 'pitfall',
       author: 'autor-a',
       force: true, // evita el aviso de similitud con otras notas del mismo suite
     })
@@ -240,6 +267,96 @@ describe('updateNote', () => {
     expect(after.rev).toBe(2)
     const history = await getNoteHistory(prisma, id)
     expect(history.length).toBe(1)
+  }, 90_000)
+
+  test('corrige kind y app: nueva revisión, historial conservado y base_rev sigue detectando el conflicto', async () => {
+    const uniq = Date.now()
+    const r = await createNote(prisma, {
+      title: `Cómo se despliega el servicio de reportes ${uniq}`,
+      body_md:
+        'El servicio de reportes se despliega con un pipeline que construye la imagen, corre las migraciones y publica el artefacto en el registry interno del equipo.',
+      app: 'cartera',
+      kind: 'pitfall',
+      author: 'autor-a',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const id = r.note.id
+    expect(r.note.kind).toBe('pitfall')
+
+    const updated = await updateNote(prisma, id, {
+      kind: 'regla',
+      app: 'general',
+      author: 'autor-b',
+      reason: 'la clasificación correcta es regla',
+      base_rev: 1,
+    })
+    expect(updated.kind).toBe('regla')
+    expect(updated.app).toBe('general')
+    expect(updated.rev).toBe(2)
+
+    // El historial conserva la revisión 1 con el contenido y la autoría originales
+    const history = await getNoteHistory(prisma, id)
+    expect(history).toHaveLength(1)
+    expect(history[0]!.rev).toBe(1)
+    expect(history[0]!.author).toBe('autor-a')
+    expect(history[0]!.reason).toBe('la clasificación correcta es regla')
+
+    // base_rev sigue detectando el conflicto después de corregir la clasificación
+    await expect(
+      updateNote(prisma, id, { kind: 'decision', author: 'autor-c', base_rev: 1 }),
+    ).rejects.toBeInstanceOf(ConflictError)
+    const after = await readNote(prisma, id)
+    expect(after.rev).toBe(2)
+    expect(after.kind).toBe('regla')
+  }, 90_000)
+
+  test("rechaza kind 'otro' en la actualización sin modificar la nota", async () => {
+    const uniq = Date.now()
+    const r = await createNote(prisma, {
+      title: `Inventario de bodegas del centro de distribución ${uniq}`,
+      body_md:
+        'El centro de distribución opera con tres bodegas: seca, refrigerada y congelada, cada una con su propio control de temperatura y su responsable asignado.',
+      app: 'cartera',
+      kind: 'pitfall',
+      author: 'autor-a',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const id = r.note.id
+
+    await expect(
+      updateNote(prisma, id, { kind: 'otro' as NoteKind, author: 'autor-b' }),
+    ).rejects.toThrow(`Valores válidos: ${NOTE_KINDS.join(', ')}`)
+
+    const after = await readNote(prisma, id)
+    expect(after.kind).toBe('pitfall')
+    expect(after.rev).toBe(1)
+    expect(await getNoteHistory(prisma, id)).toHaveLength(0)
+  }, 90_000)
+
+  test('rechaza app vacío en la actualización sin modificar la nota', async () => {
+    const uniq = Date.now()
+    const r = await createNote(prisma, {
+      title: `Convención de nombres de ramas del repositorio ${uniq}`,
+      body_md:
+        'Las ramas del repositorio se nombran con el tipo y un slug corto en kebab-case: feat/, fix/, docs/ y chore/ son los prefijos aceptados por el equipo.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'autor-a',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const id = r.note.id
+
+    await expect(
+      updateNote(prisma, id, { app: '   ', author: 'autor-b' }),
+    ).rejects.toMatchObject({ name: 'ValidationError', field: 'app' })
+
+    const after = await readNote(prisma, id)
+    expect(after.app).toBe('cartera')
+    expect(after.rev).toBe(1)
+    expect(await getNoteHistory(prisma, id)).toHaveLength(0)
   }, 90_000)
 })
 
@@ -429,7 +546,7 @@ describe('lexicalSearch (task 1.4)', () => {
       title: `Nota FTS borrado ${uniq}`,
       body_md: `Esta nota tiene el código único ${uniq} para verificar su desaparición del índice FTS tras el borrado lógico en el sistema.`,
       app: 'cartera',
-      kind: 'otro',
+      kind: 'sistema',
       author: 'tester',
       force: true,  // evita bloqueo por similitud con otras notas del mismo suite
     })

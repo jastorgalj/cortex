@@ -14,6 +14,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { warmup } from '../src/db/embeddings.ts'
 import { createApp } from '../src/index.ts'
+import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../src/db/constants.ts'
 
 const TEST_PORT = 13091
 const BASE_URL = `http://localhost:${TEST_PORT}`
@@ -58,6 +59,20 @@ function parseToolResult(result: Awaited<ReturnType<Client['callTool']>>): unkno
   const content = result.content as Array<{ type: string; text?: string }>
   const text = content.find((c) => c.type === 'text')?.text ?? ''
   try { return JSON.parse(text) } catch { return text }
+}
+
+function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
+  const content = result.content as Array<{ type: string; text?: string }>
+  return content.find((c) => c.type === 'text')?.text ?? ''
+}
+
+type KindProperty = { type?: string; enum?: string[]; description?: string }
+
+function kindProperty(inputSchema: unknown): KindProperty {
+  const props = (inputSchema as { properties?: Record<string, KindProperty> }).properties ?? {}
+  const prop = props['kind']
+  if (!prop) throw new Error('el schema de la tool no declara la propiedad kind')
+  return prop
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -231,6 +246,151 @@ describe('MCP server — cortex tools', () => {
     expect(Array.isArray(data)).toBe(true)
     // Debe haber al menos la nota del ciclo completo
     expect(data.length).toBeGreaterThanOrEqual(1)
+
+    await client.close()
+  })
+
+  test('el schema del campo kind deriva de NOTE_KINDS y describe el significado de cada tipo', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const { tools } = await client.listTools()
+
+    // Las cuatro tools que exponen `kind` lo derivan de la misma constante: mismo enum exacto
+    for (const name of ['cortex_search', 'cortex_write', 'cortex_list', 'cortex_update']) {
+      const tool = tools.find((t) => t.name === name)
+      expect(tool).toBeTruthy()
+      const kind = kindProperty(tool!.inputSchema)
+      expect(kind.enum).toEqual([...NOTE_KINDS])
+      expect(kind.description).toBeTruthy()
+      // El significado de cada tipo sale de NOTE_KIND_DESCRIPTIONS
+      for (const valid of NOTE_KINDS) {
+        expect(kind.description).toContain(NOTE_KIND_DESCRIPTIONS[valid])
+      }
+      expect(kind.description).not.toContain('otro')
+    }
+
+    await client.close()
+  })
+
+  test("cortex_write con kind 'otro' responde error que nombra los cinco válidos y no crea la nota", async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const before = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: {} }),
+    ) as Array<{ id: string }>
+
+    const result = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'Nota clasificada con el tipo retirado',
+        body_md: 'Este cuerpo válido intenta declararse con el tipo «otro», que ya no existe en el enum.',
+        app: 'general',
+        kind: 'otro',
+        author: 'mcp-test',
+        force: true,
+      },
+    })
+
+    const text = textOf(result)
+    expect((result as { isError?: boolean }).isError).toBe(true)
+    // El mensaje nombra los cinco tipos válidos
+    for (const valid of NOTE_KINDS) {
+      expect(text).toContain(valid)
+    }
+
+    // No se creó ninguna nota
+    const after = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: {} }),
+    ) as Array<{ id: string }>
+    expect(after.length).toBe(before.length)
+
+    await client.close()
+  })
+
+  test('cortex_update corrige kind y app, y rechaza clasificaciones inválidas', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const writeResult = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota mal clasificada que hay que reclasificar ${Date.now()}`,
+        body_md:
+          'El job nocturno de conciliación bancaria falla si el archivo del banco llega con el campo de monto en formato local en vez de punto decimal.',
+        app: 'cartera',
+        kind: 'pitfall',
+        author: 'mcp-test',
+        force: true,
+      },
+    })
+    const created = parseToolResult(writeResult) as { id: string; rev: number; kind: string }
+    expect(created.kind).toBe('pitfall')
+    expect(created.rev).toBe(1)
+
+    // kind inválido → rechazo, la nota no cambia
+    const badKind = await client.callTool({
+      name: 'cortex_update',
+      arguments: { id: created.id, kind: 'otro', author: 'mcp-test' },
+    })
+    expect((badKind as { isError?: boolean }).isError).toBe(true)
+    for (const valid of NOTE_KINDS) {
+      expect(textOf(badKind)).toContain(valid)
+    }
+
+    // app vacío → rechazo del dominio, nombrando el campo
+    const badApp = await client.callTool({
+      name: 'cortex_update',
+      arguments: { id: created.id, app: '   ', author: 'mcp-test' },
+    })
+    expect((badApp as { isError?: boolean }).isError).toBe(true)
+    expect(textOf(badApp)).toContain('app')
+
+    const unchanged = parseToolResult(
+      await client.callTool({ name: 'cortex_read', arguments: { id: created.id } }),
+    ) as { kind: string; app: string; rev: number }
+    expect(unchanged.kind).toBe('pitfall')
+    expect(unchanged.app).toBe('cartera')
+    expect(unchanged.rev).toBe(1)
+
+    // Con valores válidos cambia la clasificación y avanza la revisión
+    const updateResult = await client.callTool({
+      name: 'cortex_update',
+      arguments: {
+        id: created.id,
+        kind: 'regla',
+        app: 'general',
+        author: 'mcp-test',
+        reason: 'reclasificada por el agente',
+        base_rev: 1,
+      },
+    })
+    const updated = parseToolResult(updateResult) as { kind: string; app: string; rev: number }
+    expect(updated.kind).toBe('regla')
+    expect(updated.app).toBe('general')
+    expect(updated.rev).toBe(2)
+
+    // El historial conserva la revisión 1
+    const history = parseToolResult(
+      await client.callTool({ name: 'cortex_history', arguments: { id: created.id } }),
+    ) as Array<{ rev: number; reason?: string }>
+    expect(history.length).toBe(1)
+    expect(history[0]!.rev).toBe(1)
+    expect(history[0]!.reason).toBe('reclasificada por el agente')
+
+    // base_rev obsoleto sigue detectando el conflicto después de la corrección
+    const conflict = await client.callTool({
+      name: 'cortex_update',
+      arguments: { id: created.id, kind: 'decision', author: 'mcp-test', base_rev: 1 },
+    })
+    expect((conflict as { isError?: boolean }).isError).toBe(true)
+    expect(textOf(conflict)).toContain('conflicto de revisión')
+    const stillRegla = parseToolResult(
+      await client.callTool({ name: 'cortex_read', arguments: { id: created.id } }),
+    ) as { kind: string; rev: number }
+    expect(stillRegla.kind).toBe('regla')
+    expect(stillRegla.rev).toBe(2)
 
     await client.close()
   })

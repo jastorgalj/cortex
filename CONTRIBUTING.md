@@ -194,9 +194,9 @@ El repo trae dos skills y un instalador, porque son dos audiencias:
 Con el repo clonado:
 
 ```bash
-python scripts/install-skill.py                        # las dos, Hermes y Claude si existen
+python scripts/install-skill.py                        # las dos, Hermes (+ perfiles que ya la tienen) y Claude
 python scripts/install-skill.py --skills cortex-mcp     # solo la de uso del MCP
-python scripts/install-skill.py --target hermes --profiles coder,reviewer
+python scripts/install-skill.py --target hermes --profiles coder,reviewer   # forzar perfiles puntuales
 python scripts/install-skill.py --claude-project .      # además como skills de proyecto
 ```
 

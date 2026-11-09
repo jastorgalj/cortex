@@ -94,6 +94,8 @@ export type UpdateInput = {
   title?: string
   body_md?: string
   tags?: string[]
+  app?: string
+  kind?: NoteKind
   author: string
   reason?: string
   base_rev?: number
@@ -248,6 +250,17 @@ export async function updateNote(
   if (!input.author || input.author.trim() === '') {
     throw new ValidationError('El campo author es requerido para actualizar', 'author')
   }
+  // `kind` llega validado por el schema de la tool, pero la capa de datos no confía
+  // en sus llamadores: la clasificación se valida acá, igual que en createNote.
+  if (input.kind !== undefined && !NOTE_KINDS.includes(input.kind)) {
+    throw new ValidationError(
+      `kind inválido: "${input.kind}". Valores válidos: ${NOTE_KINDS.join(', ')}`,
+      'kind',
+    )
+  }
+  if (input.app !== undefined && input.app.trim() === '') {
+    throw new ValidationError('El campo app no puede estar vacío', 'app')
+  }
 
   // ── NB-4 fix: embed() FUERA de la transacción interactiva ──────────────────
   // El reviewer midió embed() en 1.84s con modelo caliente — demasiado cerca del
@@ -303,13 +316,18 @@ export async function updateNote(
     const newBodyMd = input.body_md ?? current.body_md
     const newTags = input.tags !== undefined ? input.tags : ((current.tags as string[]) ?? [])
 
-    // Actualiza la nota (Prisma @updatedAt maneja updated_at)
+    // Actualiza la nota (Prisma @updatedAt maneja updated_at).
+    // `app`/`kind` solo se escriben cuando vienen definidos. La clasificación es metadata
+    // corregible: `note_revisions` no guarda app/kind, así que la corrección no deja
+    // rastro del valor anterior (design D3 — el contenido y su autoría sí quedan).
     await tx.note.update({
       where: { id },
       data: {
         title: newTitle,
         body_md: newBodyMd,
         tags: newTags,
+        ...(input.app !== undefined ? { app: input.app } : {}),
+        ...(input.kind !== undefined ? { kind: input.kind } : {}),
         author: input.author,
         rev: { increment: 1 },
       },

@@ -38,7 +38,7 @@ para todo el equipo, así que no hay `pull`, ni ramas de conocimiento, ni confli
 |---|---|
 | `title`, `body_md` | Título y contenido en Markdown |
 | `app` | A qué sistema pertenece: `cartera`, `huella`, `api-scoring`, `general`, nombre del repo… |
-| `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` u `otro` |
+| `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` |
 | `tags` | Libres. Los que empiezan con `origen:` los reserva el importador |
 | `author` | Quién la escribe. **Obligatorio** en toda escritura |
 | `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) |

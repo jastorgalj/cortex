@@ -19,10 +19,19 @@ import {
   ConflictError,
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
+import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../db/constants.ts'
 
 // ─── Session registry ─────────────────────────────────────────────────────────
 
 const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>()
+
+/**
+ * Descripción del campo `kind` compuesta desde `NOTE_KIND_DESCRIPTIONS`: una sola fuente
+ * de los tipos y sus significados. El agente elige el tipo sin leer una nota.
+ */
+const KIND_DESCRIPTION = NOTE_KINDS.map(
+  (kind) => `${kind}: ${NOTE_KIND_DESCRIPTIONS[kind]}`,
+).join('; ')
 
 // ─── Tool registration ────────────────────────────────────────────────────────
 
@@ -35,9 +44,9 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       q: z.string().describe('Términos de búsqueda (lenguaje natural o identificadores exactos)'),
       app: z.string().optional().describe('Filtro por app (cartera, huella, general, ...)'),
       kind: z
-        .enum(['sistema', 'flujo', 'decision', 'pitfall', 'regla', 'otro'])
+        .enum(NOTE_KINDS)
         .optional()
-        .describe('Filtro por tipo de nota'),
+        .describe(`Filtro por tipo de nota — ${KIND_DESCRIPTION}`),
       limit: z.number().int().min(1).max(50).optional().describe('Máximo de resultados (default 10)'),
     },
     async ({ q, app, kind, limit }) => {
@@ -89,9 +98,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
       app: z.string().describe("App a la que pertenece (cartera, huella, general, ...)"),
-      kind: z
-        .enum(['sistema', 'flujo', 'decision', 'pitfall', 'regla', 'otro'])
-        .describe('Tipo de nota'),
+      kind: z.enum(NOTE_KINDS).describe(`Tipo de nota — ${KIND_DESCRIPTION}`),
       tags: z.array(z.string()).optional().describe('Tags'),
       author: z.string().describe('Autor de la nota (requerido; se persiste tal cual)'),
       issue: z
@@ -175,6 +182,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       title: z.string().optional().describe('Nuevo título (omite para no cambiar)'),
       body_md: z.string().optional().describe('Nuevo contenido en Markdown (omite para no cambiar)'),
       tags: z.array(z.string()).optional().describe('Nuevos tags (reemplaza los existentes)'),
+      app: z
+        .string()
+        .optional()
+        .describe('Nueva app, para corregir la clasificación (no vacía; omite para no cambiar)'),
+      kind: z
+        .enum(NOTE_KINDS)
+        .optional()
+        .describe(`Nuevo tipo de nota, para corregir la clasificación — ${KIND_DESCRIPTION}`),
       author: z.string().describe('Autor del cambio (requerido)'),
       reason: z.string().optional().describe('Motivo del cambio (queda registrado en la revisión)'),
       base_rev: z
@@ -185,7 +200,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           'Revisión esperada (rev vigente leída antes de editar). Si no coincide con la actual, rechaza con ConflictError.',
         ),
     },
-    async ({ id, title, body_md, tags, author, reason, base_rev }) => {
+    async ({ id, title, body_md, tags, app, kind, author, reason, base_rev }) => {
       if (!author?.trim()) {
         return {
           content: [
@@ -206,7 +221,16 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         }
       }
       try {
-        const note = await updateNote(prisma, id, { title, body_md, tags, author, reason, base_rev })
+        const note = await updateNote(prisma, id, {
+          title,
+          body_md,
+          tags,
+          app,
+          kind,
+          author,
+          reason,
+          base_rev,
+        })
         return { content: [{ type: 'text', text: JSON.stringify(note, null, 2) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
@@ -250,9 +274,9 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
     {
       app: z.string().optional().describe('Filtro por app'),
       kind: z
-        .enum(['sistema', 'flujo', 'decision', 'pitfall', 'regla', 'otro'])
+        .enum(NOTE_KINDS)
         .optional()
-        .describe('Filtro por tipo'),
+        .describe(`Filtro por tipo — ${KIND_DESCRIPTION}`),
       tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       author: z.string().optional().describe('Filtro por autor'),
     },
