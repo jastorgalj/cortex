@@ -13,6 +13,12 @@ import { PrismaClient } from '@prisma/client'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { warmup } from '../src/db/embeddings.ts'
+import { readFileSync } from 'node:fs'
+
+/** Versión declarada en package.json: la misma que anuncia el servidor. */
+const pkgVersion = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as { version: string }
+).version
 import { createApp } from '../src/index.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../src/db/constants.ts'
 
@@ -109,13 +115,15 @@ describe('MCP server — cortex tools', () => {
     await client.close()
   })
 
-  test('initialize responde serverInfo.name=cortex y version=0.2.0', async () => {
+  test('initialize responde serverInfo.name=cortex y la version de package.json', async () => {
     const client = makeClient()
     const transport = new StreamableHTTPClientTransport(MCP_URL)
     await client.connect(transport)
     const serverInfo = client.getServerVersion()
     expect(serverInfo?.name).toBe('cortex')
-    expect(serverInfo?.version).toBe('0.2.0')
+    // La versión no se fija a mano: se compara contra package.json, que es lo que
+    // lee el servidor. Un literal acá vuelve a esconder el día que la versión sube.
+    expect(serverInfo?.version).toBe(pkgVersion)
     await client.close()
   })
 
