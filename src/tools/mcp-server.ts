@@ -3,6 +3,7 @@
  * Usa WebStandardStreamableHTTPServerTransport (nativo Bun/Web API).
  * Un transport por sesión; session map en memoria.
  */
+import { readFileSync } from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { z } from 'zod'
@@ -20,6 +21,11 @@ import {
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../db/constants.ts'
+
+/** Versión del paquete: `package.json` es la fuente, no un literal que envejece. */
+const PKG_VERSION: string = (
+  JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8')) as { version: string }
+).version
 
 // ─── Session registry ─────────────────────────────────────────────────────────
 
@@ -401,7 +407,7 @@ function createSession(prisma: PrismaClient): WebStandardStreamableHTTPServerTra
 
   const mcpServer = new McpServer({
     name: 'cortex',
-    version: '0.2.0',
+    version: PKG_VERSION,
   })
 
   registerTools(mcpServer, prisma)
