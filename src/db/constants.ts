@@ -13,6 +13,18 @@ export const DUPLICATE_THRESHOLD = 0.55
 export const RRF_K = 60
 
 /** Enum cerrado de kinds válidos para una nota. */
-export const NOTE_KINDS = ['sistema', 'flujo', 'decision', 'pitfall', 'regla', 'otro'] as const
+export const NOTE_KINDS = ['sistema', 'flujo', 'decision', 'pitfall', 'regla'] as const
 
 export type NoteKind = typeof NOTE_KINDS[number]
+
+/**
+ * Significado de cada tipo — única fuente para el schema de las tools y la documentación.
+ * El `Record<NoteKind, string>` obliga a que exista una entrada por cada tipo de `NOTE_KINDS`.
+ */
+export const NOTE_KIND_DESCRIPTIONS: Record<NoteKind, string> = {
+  sistema: 'cómo funciona un sistema o módulo (qué hace, cómo se usa)',
+  flujo: 'un proceso con pasos u orden que importa, y sus trampas',
+  decision: 'por qué se decidió algo, con su contexto y la alternativa descartada',
+  pitfall: 'una trampa o error ya sufrido, con su causa y su arreglo',
+  regla: 'una regla del equipo que no está escrita en el código',
+}

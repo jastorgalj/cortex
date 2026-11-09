@@ -132,7 +132,9 @@ def main() -> int:
                     help=f"cuáles instalar, separadas por coma (default: {','.join(SKILLS)})")
     ap.add_argument("--target", default="hermes,claude",
                     help="hermes, claude o ambos separados por coma (default: hermes,claude)")
-    ap.add_argument("--profiles", default="", help="perfiles worker de Hermes (ej: coder,reviewer)")
+    ap.add_argument("--profiles", default="",
+                    help="perfiles worker de Hermes (ej: coder,reviewer). "
+                         "Sin esto, actualiza los perfiles que ya tienen la skill")
     ap.add_argument("--claude-project", default="", metavar="PATH",
                     help="instala además como skills de proyecto en PATH/.claude/skills/")
     ap.add_argument("--hermes-home", default="", help="override de la raíz de Hermes")
@@ -157,8 +159,17 @@ def main() -> int:
                 print(f"salto Hermes: no existe {hermes_home}")
                 continue
             print("Hermes:")
+            profiles = [p.strip() for p in args.profiles.split(",") if p.strip()]
+            if not profiles:
+                # Sin --profiles: actualizar los perfiles que YA tienen la skill, para que
+                # una copia vieja en un perfil worker no quede divergiendo en silencio.
+                for pdir in sorted((hermes_home / "profiles").glob("*/skills")):
+                    if any((pdir / SKILLS[s] / s).is_dir() for s in wanted):
+                        profiles.append(pdir.parent.name)
+                if profiles:
+                    print(f"  perfiles con la skill: {', '.join(profiles)}")
             roots = [("", hermes_home / "skills")]
-            for profile in [p.strip() for p in args.profiles.split(",") if p.strip()]:
+            for profile in profiles:
                 pdir = hermes_home / "profiles" / profile / "skills"
                 if not pdir.is_dir():
                     print(f"  salto perfil {profile}: no existe {pdir}")
