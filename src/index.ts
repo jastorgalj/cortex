@@ -2,21 +2,53 @@
  * src/index.ts — Servidor Elysia.
  */
 import { Elysia, t } from 'elysia'
-import { prisma } from './db/client.ts'
+import { prisma, rawPrisma } from './db/client.ts'
 import { listNotes, readNote, NotFoundError } from './db/notes.ts'
 import { hybridSearch } from './db/search.ts'
 import { isModelLoaded, warmup } from './db/embeddings.ts'
-import { handleMcpRequest } from './tools/mcp-server.ts'
+import { handleMcpRequest, getActiveSessions, closeAllSessions, sweepIdleSessions } from './tools/mcp-server.ts'
 import { renderNoteList, renderNote } from './web/views.ts'
+import { createHealthProbe } from './health.ts'
+import { parseSessionTtlMinutes } from './tools/sessions.ts'
+import { createShutdown } from './shutdown.ts'
 
 export const PORT = Number(process.env.PORT ?? 3091)
 
-export function createApp(): Elysia {
+export interface AppOptions {
+  /** Función que cuenta notas; default: rawPrisma.note.count sin reintentos. */
+  countNotes?: () => Promise<number>
+}
+
+export function createApp(opts: AppOptions = {}): Elysia {
+  const countNotes = opts.countNotes ?? (() => rawPrisma.note.count({ where: { deleted_at: null } }))
+  const probe = createHealthProbe({ countNotes })
+
   const app = new Elysia()
 
-  app.get('/health', async () => {
-    const count = await prisma.note.count({ where: { deleted_at: null } })
-    return { status: 'ok', notes: count, model_loaded: isModelLoaded() }
+  app.get('/health', async ({ set }) => {
+    const result = await probe()
+    const sessions = getActiveSessions()
+    const uptime_s = Math.floor(process.uptime())
+
+    if (result.ok) {
+      return {
+        status: 'ok',
+        notes: result.notes,
+        model_loaded: isModelLoaded(),
+        sessions,
+        uptime_s,
+      }
+    } else {
+      set.status = 503
+      return {
+        status: 'degraded',
+        db: 'down',
+        model_loaded: isModelLoaded(),
+        sessions,
+        uptime_s,
+        error: 'base de datos no disponible',
+      }
+    }
   })
 
   app.all('/mcp', ({ request }) => handleMcpRequest(request, prisma))
@@ -102,5 +134,29 @@ if (import.meta.main) {
   const app = createApp()
   app.listen(PORT, () => {
     console.log(`[cortex] Servidor escuchando en http://localhost:${PORT}`)
+  })
+
+  const ttlMs = parseSessionTtlMinutes(process.env.MCP_SESSION_TTL_MINUTES) * 60 * 1000
+  const sweepInterval = setInterval(() => sweepIdleSessions(ttlMs), 60_000)
+  sweepInterval.unref()
+
+  const shutdown = createShutdown({
+    closeSessions: closeAllSessions,
+    stopServer: async () => {
+      await app.stop()
+    },
+    disconnect: () => rawPrisma.$disconnect(),
+  })
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('uncaughtException', async (err) => {
+    console.error('[cortex] Excepción no capturada:', err.stack)
+    await shutdown('uncaughtException', 1)
+  })
+  process.on('unhandledRejection', async (reason) => {
+    const e = reason instanceof Error ? reason : new Error(String(reason))
+    console.error('[cortex] Promesa rechazada sin manejar:', e.stack)
+    await shutdown('unhandledRejection', 1)
   })
 }

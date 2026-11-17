@@ -68,15 +68,23 @@ afterAll(async () => {
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 describe('GET /health', () => {
-  test('responde 200 con {status, notes, model_loaded}', async () => {
+  test('responde 200 con {status, notes, model_loaded, sessions, uptime_s}', async () => {
     const r = await fetch(`${BASE_URL}/health`)
     expect(r.status).toBe(200)
-    const body = await r.json() as { status: string; notes: number; model_loaded: boolean }
+    const body = await r.json() as {
+      status: string
+      notes: number
+      model_loaded: boolean
+      sessions: number
+      uptime_s: number
+    }
     expect(body.status).toBe('ok')
     expect(typeof body.notes).toBe('number')
     expect(typeof body.model_loaded).toBe('boolean')
     // model_loaded debe ser true porque hicimos warmup en beforeAll
     expect(body.model_loaded).toBe(true)
+    expect(typeof body.sessions).toBe('number')
+    expect(typeof body.uptime_s).toBe('number')
   })
 })
 

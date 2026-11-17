@@ -21,6 +21,7 @@ import {
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../db/constants.ts'
+import { SessionRegistry } from './sessions.ts'
 
 /** Versión del paquete: `package.json` es la fuente, no un literal que envejece. */
 const PKG_VERSION: string = (
@@ -29,7 +30,7 @@ const PKG_VERSION: string = (
 
 // ─── Session registry ─────────────────────────────────────────────────────────
 
-const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>()
+const registry = new SessionRegistry()
 
 /**
  * Descripción del campo `kind` compuesta desde `NOTE_KIND_DESCRIPTIONS`: una sola fuente
@@ -398,10 +399,10 @@ function createSession(prisma: PrismaClient): WebStandardStreamableHTTPServerTra
     sessionIdGenerator: () => crypto.randomUUID(),
     enableJsonResponse: true,
     onsessioninitialized: (sid) => {
-      sessions.set(sid, transport)
+      registry.add(sid, transport)
     },
     onsessionclosed: (sid) => {
-      sessions.delete(sid)
+      registry.delete(sid, 'delete')
     },
   })
 
@@ -429,10 +430,14 @@ export async function handleMcpRequest(
   const sessionId = request.headers.get('mcp-session-id')
 
   if (sessionId) {
-    const transport = sessions.get(sessionId)
+    const transport = registry.get(sessionId)
     if (!transport) {
       return new Response(
-        JSON.stringify({ error: `Sesión '${sessionId}' no encontrada o expirada. Reconecta enviando initialize sin mcp-session-id.` }),
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found' },
+          id: null,
+        }),
         { status: 404, headers: { 'Content-Type': 'application/json' } },
       )
     }
@@ -492,5 +497,15 @@ export async function handleMcpRequest(
 
 /** Devuelve el número de sesiones MCP activas (para /health). */
 export function getActiveSessions(): number {
-  return sessions.size
+  return registry.size
+}
+
+/** Cierra todas las sesiones MCP (para el cierre limpio). */
+export function closeAllSessions(motivo: 'shutdown' = 'shutdown'): void {
+  registry.closeAll(motivo)
+}
+
+/** Elimina las sesiones cuyo lastSeen supere el TTL (llamado desde el barrido). */
+export function sweepIdleSessions(ttlMs: number): void {
+  registry.sweep(Date.now(), ttlMs)
 }
