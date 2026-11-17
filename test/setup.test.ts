@@ -41,4 +41,15 @@ describe('setup', () => {
     `
     expect(result.length).toBe(1)
   })
+
+  test('columna force_reason existe y es anulable (task 1.4)', async () => {
+    const result = await prisma.$queryRaw<{ column_name: string; is_nullable: string }[]>`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_name = 'notes'
+        AND column_name = 'force_reason'
+    `
+    expect(result.length).toBe(1)
+    expect(result[0].is_nullable).toBe('YES')
+  })
 })

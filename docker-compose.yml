@@ -24,6 +24,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://cortex:cortex_dev@db:5432/cortex}
       PORT: 3091
       NODE_ENV: production
+      CORTEX_DUPLICATE_THRESHOLD: ${CORTEX_DUPLICATE_THRESHOLD:-}
     volumes:
       - model-cache:/app/.model-cache
     depends_on:

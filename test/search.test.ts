@@ -17,6 +17,7 @@ import { PrismaClient } from '@prisma/client'
 import { createNote } from '../src/db/notes.ts'
 import { hybridSearch } from '../src/db/search.ts'
 import { warmup } from '../src/db/embeddings.ts'
+import { duplicateThreshold } from '../src/db/constants.ts'
 
 const prisma = new PrismaClient()
 
@@ -121,7 +122,7 @@ beforeAll(async () => {
       author: 'fixture',
       tags,
       ...(f.issue !== undefined ? { issue: f.issue } : {}),
-      ...(needsForce ? { force: true } : {}),
+      ...(needsForce ? { force: true, reason: 'fixture de test' } : {}),
     })
     if (r.status !== 'created' && !needsForce) {
       console.warn(`[search.test] Nota ${i} fue detectada como duplicado. Reintentando con force.`)
@@ -134,6 +135,7 @@ beforeAll(async () => {
         tags,
         ...(f.issue !== undefined ? { issue: f.issue } : {}),
         force: true,
+        reason: 'bypass similitud: datos de test',
       })
       if (r2.status === 'created') {
         if (i === 0) mtd359NoteId = r2.note.id
@@ -221,6 +223,7 @@ describe('detección de duplicados (task 2.3)', () => {
       kind: 'regla',
       author: 'tester',
       force: true, // bypass posible similitud con notas del fixture
+      reason: 'bypass similitud: datos de test',
     })
     if (ref.status !== 'created') throw new Error('No se creó la nota de referencia')
 
@@ -235,7 +238,7 @@ describe('detección de duplicados (task 2.3)', () => {
     expect(r.status).toBe('similar_exists')
     if (r.status === 'similar_exists') {
       expect(r.candidates.length).toBeGreaterThan(0)
-      expect(r.candidates.every((c) => c.score >= 0.55)).toBe(true)
+      expect(r.candidates.every((c) => c.score >= duplicateThreshold())).toBe(true)
     }
   }, 90_000)
 
@@ -247,6 +250,7 @@ describe('detección de duplicados (task 2.3)', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     expect(r.status).toBe('created')
     if (r.status === 'created') {
@@ -268,6 +272,7 @@ describe('embedding al crear/actualizar (task 2.4)', () => {
       kind: 'flujo',
       author: 'tester',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se pudo crear nota de test')
     const noteId = r.note.id

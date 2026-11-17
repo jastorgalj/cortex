@@ -1,5 +1,12 @@
 import { type PrismaClient, Prisma } from '@prisma/client'
-import { NOTE_KINDS, type NoteKind, DUPLICATE_THRESHOLD, ISSUE_NORMALIZED_SQL } from './constants.ts'
+import {
+  NOTE_KINDS,
+  type NoteKind,
+  duplicateThreshold,
+  DUPLICATE_DISTINCT_MARGIN,
+  TITLE_SIMILARITY_THRESHOLD,
+  ISSUE_NORMALIZED_SQL,
+} from './constants.ts'
 import { generateUlid } from './ulid.ts'
 import { embed } from './embeddings.ts'
 
@@ -15,6 +22,7 @@ export type NoteDto = {
   author: string
   issue: string | null
   rev: number
+  force_reason: string | null
   created_at: Date
   updated_at: Date
   deleted_at: Date | null
@@ -35,6 +43,13 @@ export type DuplicateCandidate = {
   id: string
   title: string
   score: number
+  app: string
+  kind: NoteKind
+  issue: string | null
+  updated_at: Date
+  same_issue: boolean
+  same_kind: boolean
+  matched_by: 'coseno' | 'issue_y_titulo'
 }
 
 export type LexicalResult = {
@@ -88,6 +103,7 @@ export type CreateInput = {
   author: string
   issue?: string
   force?: boolean
+  reason?: string
 }
 
 export type UpdateInput = {
@@ -122,6 +138,7 @@ type NoteRow = {
   author: string
   issue: string | null
   rev: number
+  force_reason: string | null
   created_at: Date
   updated_at: Date
   deleted_at: Date | null
@@ -138,6 +155,7 @@ function toNoteDto(note: NoteRow): NoteDto {
     author: note.author,
     issue: note.issue,
     rev: note.rev,
+    force_reason: note.force_reason,
     created_at: note.created_at,
     updated_at: note.updated_at,
     deleted_at: note.deleted_at,
@@ -167,26 +185,133 @@ function validateCreate(input: CreateInput): void {
   if (!input.body_md || input.body_md.trim() === '') {
     throw new ValidationError('El campo body_md es requerido', 'body_md')
   }
+  if (input.force && !input.reason?.trim()) {
+    throw new ValidationError('El campo reason es requerido cuando force es true', 'reason')
+  }
+}
+
+/** Entrada para clasificar un candidato duplicado (desde la BD + título similarity). */
+type CandidateInput = {
+  score: number
+  title_sim: number
+  kind: string
+  issue: string | null
+}
+
+/** Metadatos de la nota nueva que se está intentando crear. */
+type NewNoteInput = {
+  kind: string
+  issue?: string
+}
+
+/**
+ * Clasifica un candidato según las reglas de deduplicación (design D3).
+ * Puro: sin I/O, fácil de testear con números explícitos.
+ * Orden fijo: coseno (con margen) → issue_y_titulo.
+ */
+export function classifyCandidate(
+  c: CandidateInput,
+  input: NewNoteInput,
+  T: number,
+): { matched_by: 'coseno' | 'issue_y_titulo'; same_issue: boolean; same_kind: boolean } | null {
+  const normalizeIssue = (v: string | null | undefined): string | null => {
+    if (!v) return null
+    const t = v.trim().toLowerCase()
+    return t === '' ? null : t
+  }
+
+  const cIssue = normalizeIssue(c.issue)
+  const nIssue = normalizeIssue(input.issue)
+  const same_issue = cIssue !== null && nIssue !== null && cIssue === nIssue
+  const same_kind = c.kind === input.kind
+  const distinct = !same_kind || (cIssue !== null && nIssue !== null && cIssue !== nIssue)
+  const required = T + (distinct ? DUPLICATE_DISTINCT_MARGIN : 0)
+
+  if (c.score >= required) {
+    return { matched_by: 'coseno', same_issue, same_kind }
+  }
+  if (same_issue && c.title_sim >= TITLE_SIMILARITY_THRESHOLD) {
+    return { matched_by: 'issue_y_titulo', same_issue, same_kind }
+  }
+  return null
 }
 
 async function findDuplicates(
   prisma: PrismaClient,
   vector: number[],
+  input: { kind: string; issue?: string; title: string },
+  T: number,
 ): Promise<DuplicateCandidate[]> {
   const vecStr = `[${vector.join(',')}]`
-  const rows = await prisma.$queryRaw<{ id: string; title: string; score: number }[]>(
-    Prisma.sql`
-      SELECT id, title,
-             1 - (embedding <=> ${vecStr}::vector(768)) AS score
-      FROM notes
-      WHERE deleted_at IS NULL
-        AND embedding IS NOT NULL
-        AND 1 - (embedding <=> ${vecStr}::vector(768)) >= ${DUPLICATE_THRESHOLD}
-      ORDER BY embedding <=> ${vecStr}::vector(768)
-      LIMIT 5
-    `,
+  const nIssue = input.issue?.trim().toLowerCase() ?? ''
+  const hasIssue = nIssue !== ''
+
+  const rows = await prisma.$queryRaw<{
+    id: string
+    title: string
+    score: number
+    app: string
+    kind: string
+    issue: string | null
+    updated_at: Date
+    title_sim: number
+  }[]>(
+    hasIssue
+      ? Prisma.sql`
+        SELECT id, title,
+               1 - (embedding <=> ${vecStr}::vector(768)) AS score,
+               app, kind, issue, updated_at,
+               similarity(unaccent(title), unaccent(${input.title})) AS title_sim
+        FROM notes
+        WHERE deleted_at IS NULL
+          AND embedding IS NOT NULL
+          AND (
+            1 - (embedding <=> ${vecStr}::vector(768)) >= ${T}
+            OR lower(btrim(coalesce(issue, ''))) = ${nIssue}
+          )
+        ORDER BY embedding <=> ${vecStr}::vector(768)
+        LIMIT 50
+      `
+      : Prisma.sql`
+        SELECT id, title,
+               1 - (embedding <=> ${vecStr}::vector(768)) AS score,
+               app, kind, issue, updated_at,
+               similarity(unaccent(title), unaccent(${input.title})) AS title_sim
+        FROM notes
+        WHERE deleted_at IS NULL
+          AND embedding IS NOT NULL
+          AND 1 - (embedding <=> ${vecStr}::vector(768)) >= ${T}
+        ORDER BY embedding <=> ${vecStr}::vector(768)
+        LIMIT 50
+      `,
   )
-  return rows.map((r) => ({ id: r.id, title: r.title, score: Number(r.score) }))
+
+  const classified: DuplicateCandidate[] = []
+  for (const r of rows) {
+    const result = classifyCandidate(
+      { score: Number(r.score), title_sim: Number(r.title_sim), kind: r.kind, issue: r.issue },
+      { kind: input.kind, issue: input.issue },
+      T,
+    )
+    if (result) {
+      classified.push({
+        id: r.id,
+        title: r.title,
+        score: Number(r.score),
+        app: r.app,
+        kind: r.kind as NoteKind,
+        issue: r.issue,
+        updated_at: r.updated_at,
+        same_issue: result.same_issue,
+        same_kind: result.same_kind,
+        matched_by: result.matched_by,
+      })
+    }
+  }
+
+  // Orden: score desc; corte a 5
+  classified.sort((a, b) => b.score - a.score)
+  return classified.slice(0, 5)
 }
 
 // ─── API pública ──────────────────────────────────────────────────────────────
@@ -202,7 +327,13 @@ export async function createNote(
   const vector = await embed(input.title + ' ' + input.body_md)
 
   if (!input.force) {
-    const candidates = await findDuplicates(prisma, vector)
+    const T = duplicateThreshold()
+    const candidates = await findDuplicates(
+      prisma,
+      vector,
+      { kind: input.kind, issue: input.issue, title: input.title },
+      T,
+    )
     if (candidates.length > 0) {
       return { status: 'similar_exists', candidates }
     }
@@ -221,6 +352,7 @@ export async function createNote(
         tags,
         author: input.author,
         issue: input.issue ?? null,
+        force_reason: input.force ? (input.reason!.trim()) : null,
       },
     })
     // embedding es Unsupported en Prisma → $executeRaw
@@ -289,7 +421,7 @@ export async function updateNote(
   return prisma.$transaction(async (tx) => {
     // Bloqueo pesimista sobre la fila
     const rows = await tx.$queryRaw<NoteRow[]>(
-      Prisma.sql`SELECT id, title, body_md, app, kind, tags, author, issue, rev,
+      Prisma.sql`SELECT id, title, body_md, app, kind, tags, author, issue, rev, force_reason,
                         created_at, updated_at, deleted_at
                  FROM notes WHERE id = ${id} FOR UPDATE`,
     )
@@ -403,7 +535,7 @@ export async function softDeleteNote(
   return prisma.$transaction(async (tx) => {
     // Bloqueo pesimista sobre la fila; sin embed() — la transacción debe ser rápida
     const rows = await tx.$queryRaw<NoteRow[]>(
-      Prisma.sql`SELECT id, title, body_md, app, kind, tags, author, issue, rev,
+      Prisma.sql`SELECT id, title, body_md, app, kind, tags, author, issue, rev, force_reason,
                         created_at, updated_at, deleted_at
                FROM notes WHERE id = ${id} FOR UPDATE`,
     )

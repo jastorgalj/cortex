@@ -63,10 +63,15 @@ evita repetir un error, `decision` es lo que responde «¿por qué está así?»
 
 ## Deduplicado: el servidor avisa, vos decidís
 
-Antes de crear, el servidor compara y responde `similar_exists` si hay algo parecido:
+Antes de crear, el servidor compara y responde `similar_exists` si hay algo parecido.
+Leé las candidatas: traen `app`, `kind`, `issue`, `matched_by` (`coseno` o `issue_y_titulo`),
+`same_issue` y `same_kind` para que puedas decidir qué hacer.
 
-- **Misma idea, otra redacción** → `cortex_update` sobre la existente, con `reason`.
-- **Idea distinta que se parece** → crear con `force: true` (y tags que la distingan).
+- **Misma idea, otra redacción** → `cortex_update` sobre la candidata con `id` indicado, con `reason`.
+- **Idea distinta que se parece** → crear con `force: true` y `reason` explicando por qué no es un
+  duplicado. El `reason` queda guardado en la nota (`force_reason`).
+- **Buscá con `cortex_search` antes de crear**: una paráfrasis de otra nota puede quedar bajo el umbral
+  y no avisar. Si no encontrás nada, recién creá.
 - Nunca dos notas para lo mismo: la segunda se desactualiza y miente.
 
 ## Concurrencia: dos agentes, una nota

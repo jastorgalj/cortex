@@ -45,9 +45,12 @@ para todo el equipo, así que no hay `pull`, ni ramas de conocimiento, ni confli
 
 Tres reglas que hacen que la memoria no se degrade:
 
-- **Antes de crear, avisa si ya existe algo parecido** (similitud ≥ 0.55) y devuelve `similar_exists`
-  con las candidatas. El agente decide si actualiza la existente o crea igual con `force: true`; el
-  servidor nunca fusiona por su cuenta.
+- **Antes de crear, avisa si ya existe algo parecido** (coseno ≥ umbral configurable, default 0.75,
+  o mismo issue con título casi igual) y devuelve `similar_exists` con las candidatas. Las candidatas
+  incluyen `app`, `kind`, `issue`, `matched_by` y `same_issue` para que el agente pueda decidir.
+  Usar `cortex_update` sobre la candidata si es la misma idea; `force: true` con `reason` obligatorio
+  para crear igual cuando se trata de una idea genuinamente distinta. El `reason` queda guardado en la
+  nota y aparece en `cortex_read`, `cortex_list` y `GET /api/notes/:id`.
 - **Toda actualización conserva la versión anterior**, y dos agentes no se pisan en silencio: si la
   nota cambió desde que se leyó, la escritura se rechaza e indica la revisión vigente.
 - **Borrar es lógico y deja huella:** exige autor y motivo, la nota desaparece de búsquedas y
@@ -59,7 +62,7 @@ Tres reglas que hacen que la memoria no se degrade:
 |---|---|
 | `cortex_search` | Búsqueda híbrida (léxica + semántica). Filtros opcionales por `app`, `kind`, `issue` y `tags` (AND) |
 | `cortex_read` | Leer una nota completa por id |
-| `cortex_write` | Crear una nota. Detecta duplicados; `force: true` para crear igual |
+| `cortex_write` | Crear una nota. Detecta duplicados (umbral 0.75 configurable); `force: true` + `reason` para crear igual |
 | `cortex_update` | Actualizar una nota; puede corregir o quitar `issue` con `reason` y la revisión que se leyó, opcionales |
 | `cortex_list` | Listar notas con filtros (`app`, `kind`, tags, autor, `issue`) |
 | `cortex_history` | Historial de revisiones de una nota |
@@ -78,6 +81,7 @@ docker pull ghcr.io/jastorgalj/cortex:latest
 
 docker run -d --name cortex -p 3091:3091 \
   -e DATABASE_URL="postgresql://usuario:clave@host:5432/cortex" \
+  -e CORTEX_DUPLICATE_THRESHOLD=0.75 \
   -v cortex-model-cache:/app/.model-cache \
   --restart unless-stopped \
   ghcr.io/jastorgalj/cortex:latest
