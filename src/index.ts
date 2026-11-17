@@ -56,9 +56,13 @@ export function createApp(opts: AppOptions = {}): Elysia {
   app.get(
     '/api/search',
     async ({ query }) => {
-      const { q, app: appFilter, kind, limit } = query
+      const { q, app: appFilter, kind, limit, issue, tags: tagsStr } = query
       if (!q) return { error: "El parametro 'q' es requerido" }
-      return hybridSearch(prisma, q, { app: appFilter, kind }, Number(limit) || 10)
+      // tags=a,b,c → array sin vacíos
+      const tags = tagsStr
+        ? tagsStr.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : undefined
+      return hybridSearch(prisma, q, { app: appFilter, kind, issue, tags }, Number(limit) || 10)
     },
     {
       query: t.Object({
@@ -66,6 +70,8 @@ export function createApp(opts: AppOptions = {}): Elysia {
         app: t.Optional(t.String()),
         kind: t.Optional(t.String()),
         limit: t.Optional(t.String()),
+        issue: t.Optional(t.String()),
+        tags: t.Optional(t.String()),
       }),
     },
   )

@@ -202,3 +202,168 @@ describe('Vista web de solo lectura', () => {
     expect(html).not.toContain('Novara KB')
   })
 })
+
+// ─── Filtros issue y tags en /api/search (task 5.7) ───────────────────────────
+
+describe('GET /api/search — filtros issue y tags (5.7)', () => {
+  let noteTagAxId = ''   // issue:api-1, tags:[area:x]
+  let noteTagAxRyId = '' // issue:api-1, tags:[area:x, repo:y]
+  let noteTagNoneId = '' // issue:api-1, sin tags
+  let noteApi2Id = ''    // issue:api-2, mismo vocabulario — para verificar exclusión
+
+  beforeAll(async () => {
+    // Crear notas de fixture con issue/tags via MCP
+    const client = new Client({ name: 'api-test-5.7', version: '1.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`))
+    await client.connect(transport)
+
+    const rA = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota API-1 con area:x ${Date.now()}`,
+        body_md: 'Regla de gestión de rendimientos de inversión API-1 en la financiera con tag area:x para verificar el filtro por tags en la ruta REST de búsqueda.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'api-test-5.7',
+        issue: 'API-1',
+        tags: ['area:x'],
+        force: true,
+      },
+    })
+    const dataA = JSON.parse(((rA.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
+    noteTagAxId = dataA.id
+
+    const rB = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota API-1 con area:x repo:y ${Date.now()}`,
+        body_md: 'Configuración de rendimientos de inversión API-1 en la financiera con tags area:x y repo:y para verificar el filtro AND por tags en la ruta REST de búsqueda.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'api-test-5.7',
+        issue: 'API-1',
+        tags: ['area:x', 'repo:y'],
+        force: true,
+      },
+    })
+    const dataB = JSON.parse(((rB.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
+    noteTagAxRyId = dataB.id
+
+    const rC = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota API-1 sin tags ${Date.now()}`,
+        body_md: 'Análisis de rendimientos de inversión API-1 en la financiera sin tags para verificar que el filtro por tags la excluye correctamente en la ruta REST de búsqueda.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'api-test-5.7',
+        issue: 'API-1',
+        force: true,
+      },
+    })
+    const dataC = JSON.parse(((rC.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
+    noteTagNoneId = dataC.id
+
+    // Nota con OTRO issue (API-2) — mismo vocabulario para que aparezca en búsqueda
+    const rD = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota API-2 rendimientos inversion ${Date.now()}`,
+        body_md: 'Revisión de rendimientos de inversión API-2 en la financiera con distinto issue para verificar que el filtro por issue excluye correctamente en la ruta REST de búsqueda.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'api-test-5.7',
+        issue: 'API-2',
+        force: true,
+      },
+    })
+    const dataD = JSON.parse(((rD.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
+    noteApi2Id = dataD.id
+
+    await client.close()
+    console.log(`[api.test 5.7] noteTagAxId=${noteTagAxId}, noteTagAxRyId=${noteTagAxRyId}, noteTagNoneId=${noteTagNoneId}, noteApi2Id=${noteApi2Id}`)
+  }, 15 * 60 * 1000)
+
+  test('/api/search?q=...&tags=area:x devuelve solo notas con area:x', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&tags=area:x`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string }>
+    const ids = results.map((x) => x.id)
+    expect(ids).toContain(noteTagAxId)
+    expect(ids).toContain(noteTagAxRyId) // también tiene area:x
+    expect(ids).not.toContain(noteTagNoneId) // sin tags
+  })
+
+  test('/api/search?q=...&tags=area:x,repo:y (AND) devuelve solo notas con ambos tags', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&tags=area:x,repo:y`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string }>
+    const ids = results.map((x) => x.id)
+    expect(ids).toContain(noteTagAxRyId) // tiene ambos
+    expect(ids).not.toContain(noteTagAxId) // solo tiene area:x
+    expect(ids).not.toContain(noteTagNoneId)
+  })
+
+  test('/api/search?q=...&tags=,area:x, (comas extras) normaliza igual que area:x', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&tags=%2Carea%3Ax%2C`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string }>
+    const ids = results.map((x) => x.id)
+    // Mismo resultado que tags=area:x
+    expect(ids).toContain(noteTagAxId)
+    expect(ids).toContain(noteTagAxRyId)
+    expect(ids).not.toContain(noteTagNoneId)
+  })
+
+  test('/api/search?q=...&issue=api-1 filtra por issue (case-insensitive) y excluye otro issue', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&issue=api-1`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string; issue?: string | null }>
+    const ids = results.map((x) => x.id)
+    expect(ids).toContain(noteTagAxId)
+    expect(ids).toContain(noteTagAxRyId)
+    expect(ids).toContain(noteTagNoneId)
+    // La nota con issue API-2 NO debe aparecer — esto hace fallar el test si se quita el filtro
+    expect(ids).not.toContain(noteApi2Id)
+    // Todos los resultados deben tener issue (no undefined)
+    for (const r of results) {
+      expect('issue' in r).toBe(true)
+    }
+  })
+
+  test('/api/search?q=...&issue=api-2 devuelve nota API-2 y excluye notas API-1', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&issue=api-2`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string }>
+    const ids = results.map((x) => x.id)
+    expect(ids).toContain(noteApi2Id)
+    // Las 3 notas de API-1 no deben aparecer
+    expect(ids).not.toContain(noteTagAxId)
+    expect(ids).not.toContain(noteTagAxRyId)
+    expect(ids).not.toContain(noteTagNoneId)
+  })
+
+  test('/api/search resultados incluyen campo issue', async () => {
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&issue=API-1`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ id: string; issue?: string | null }>
+    expect(results.length).toBeGreaterThan(0)
+    const hit = results.find((x) => x.id === noteTagAxId)
+    expect(hit).toBeDefined()
+    expect(hit!.issue).toBe('API-1')
+  })
+
+  test('/api/search ids con issue/tags coinciden con hybridSearch directo', async () => {
+    // REST
+    const r = await fetch(`${BASE_URL}/api/search?q=rendimientos+inversion&tags=area:x&issue=API-1`)
+    expect(r.status).toBe(200)
+    const apiResults = await r.json() as Array<{ id: string }>
+    const apiIds = apiResults.map((x) => x.id).sort()
+
+    // Directo
+    const dbResults = await hybridSearch(prisma, 'rendimientos inversion', { tags: ['area:x'], issue: 'API-1' }, 10)
+    const dbIds = dbResults.map((x) => x.id).sort()
+
+    expect(apiIds).toEqual(dbIds)
+  })
+})

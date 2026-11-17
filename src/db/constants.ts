@@ -2,6 +2,7 @@
  * Umbrales y constantes del núcleo — sin flags de configuración.
  * Los valores vienen de medición real sobre contenido del equipo (Decisión 4 y 5).
  */
+import { Prisma } from '@prisma/client'
 
 /** Similarity coseno por debajo de la cual el resultado semántico se descarta antes de fusionar. */
 export const SEMANTIC_DISCARD_THRESHOLD = 0.25
@@ -28,3 +29,10 @@ export const NOTE_KIND_DESCRIPTIONS: Record<NoteKind, string> = {
   pitfall: 'una trampa o error ya sufrido, con su causa y su arreglo',
   regla: 'una regla del equipo que no está escrita en el código',
 }
+
+/**
+ * Expresión SQL normalizada para el campo issue — coincide exactamente con el índice
+ * notes_issue_idx. El planner solo usa el índice si la expresión de la consulta coincide
+ * con la declarada en la migración (Design D3).
+ */
+export const ISSUE_NORMALIZED_SQL = Prisma.raw('lower(btrim(issue))')

@@ -30,6 +30,7 @@ claude mcp add --transport http cortex http://localhost:3091/mcp
 
 ```
 Empiezo una tarea en <app>   → cortex_search (q + app) y cortex_list con kind=regla
+Retomo un ticket              → cortex_list o cortex_search con issue=<ID>
 Encontré algo relevante      → cortex_read (la nota completa, no el snippet)
 Aprendí algo que el equipo debe saber:
    ¿ya existe?               → cortex_update (reason; y base_rev si la leí antes)

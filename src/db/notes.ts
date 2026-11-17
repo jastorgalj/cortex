@@ -1,5 +1,5 @@
 import { type PrismaClient, Prisma } from '@prisma/client'
-import { NOTE_KINDS, type NoteKind, DUPLICATE_THRESHOLD } from './constants.ts'
+import { NOTE_KINDS, type NoteKind, DUPLICATE_THRESHOLD, ISSUE_NORMALIZED_SQL } from './constants.ts'
 import { generateUlid } from './ulid.ts'
 import { embed } from './embeddings.ts'
 
@@ -99,6 +99,7 @@ export type UpdateInput = {
   author: string
   reason?: string
   base_rev?: number
+  issue?: string | null
 }
 
 export type ListFilter = {
@@ -106,6 +107,7 @@ export type ListFilter = {
   kind?: string
   tags?: string[]
   author?: string
+  issue?: string
 }
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
@@ -261,6 +263,9 @@ export async function updateNote(
   if (input.app !== undefined && input.app.trim() === '') {
     throw new ValidationError('El campo app no puede estar vacío', 'app')
   }
+  if (input.issue !== undefined && input.issue !== null && input.issue.trim() === '') {
+    throw new ValidationError('El campo issue no puede estar vacío — usa null para quitarlo', 'issue')
+  }
 
   // ── NB-4 fix: embed() FUERA de la transacción interactiva ──────────────────
   // El reviewer midió embed() en 1.84s con modelo caliente — demasiado cerca del
@@ -328,6 +333,7 @@ export async function updateNote(
         tags: newTags,
         ...(input.app !== undefined ? { app: input.app } : {}),
         ...(input.kind !== undefined ? { kind: input.kind } : {}),
+        ...(input.issue !== undefined ? { issue: input.issue === null ? null : input.issue.trim() } : {}),
         author: input.author,
         rev: { increment: 1 },
       },
@@ -350,12 +356,23 @@ export async function listNotes(
   prisma: PrismaClient,
   filter: ListFilter = {},
 ): Promise<NoteDto[]> {
+  // Filtro SQL de issue: pre-filtra ids para usar el índice notes_issue_idx
+  let issueIds: string[] | null = null
+  const issueTrimmed = filter.issue?.trim()
+  if (issueTrimmed) {
+    const rows = await prisma.$queryRaw<{ id: string }[]>(
+      Prisma.sql`SELECT id FROM notes WHERE deleted_at IS NULL AND ${ISSUE_NORMALIZED_SQL} = lower(${issueTrimmed})`,
+    )
+    issueIds = rows.map((r) => r.id)
+  }
+
   const notes = await prisma.note.findMany({
     where: {
       deleted_at: null,
       ...(filter.app ? { app: filter.app } : {}),
       ...(filter.kind ? { kind: filter.kind } : {}),
       ...(filter.author ? { author: filter.author } : {}),
+      ...(issueIds !== null ? { id: { in: issueIds } } : {}),
     },
     orderBy: { updated_at: 'desc' },
   })

@@ -46,7 +46,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_search ──────────────────────────────────────────────────────────
   server.tool(
     'cortex_search',
-    'Búsqueda híbrida (léxica + semántica con fusión RRF) en Cortex. Devuelve notas ordenadas por relevancia con id, título, snippet, score y origen.',
+    'Búsqueda híbrida (léxica + semántica con fusión RRF) en Cortex. Devuelve notas ordenadas por relevancia con id, título, snippet, score, origen e issue.',
     {
       q: z.string().describe('Términos de búsqueda (lenguaje natural o identificadores exactos)'),
       app: z.string().optional().describe('Filtro por app (cartera, huella, general, ...)'),
@@ -54,11 +54,13 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         .enum(NOTE_KINDS)
         .optional()
         .describe(`Filtro por tipo de nota — ${KIND_DESCRIPTION}`),
+      issue: z.string().optional().describe('Filtro por issue (CAR-123, #134 — sin importar mayúsculas ni espacios)'),
+      tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       limit: z.number().int().min(1).max(50).optional().describe('Máximo de resultados (default 10)'),
     },
-    async ({ q, app, kind, limit }) => {
+    async ({ q, app, kind, issue, tags, limit }) => {
       try {
-        const results = await hybridSearch(prisma, q, { app, kind }, limit ?? 10)
+        const results = await hybridSearch(prisma, q, { app, kind, issue, tags }, limit ?? 10)
         return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -197,6 +199,11 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         .enum(NOTE_KINDS)
         .optional()
         .describe(`Nuevo tipo de nota, para corregir la clasificación — ${KIND_DESCRIPTION}`),
+      issue: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Issue relacionado (omite para no cambiar; null para quitarlo; string vacío es error)'),
       author: z.string().describe('Autor del cambio (requerido)'),
       reason: z.string().optional().describe('Motivo del cambio (queda registrado en la revisión)'),
       base_rev: z
@@ -207,7 +214,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           'Revisión esperada (rev vigente leída antes de editar). Si no coincide con la actual, rechaza con ConflictError.',
         ),
     },
-    async ({ id, title, body_md, tags, app, kind, author, reason, base_rev }) => {
+    async ({ id, title, body_md, tags, app, kind, issue, author, reason, base_rev }) => {
       if (!author?.trim()) {
         return {
           content: [
@@ -234,6 +241,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           tags,
           app,
           kind,
+          issue,
           author,
           reason,
           base_rev,
@@ -286,10 +294,11 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         .describe(`Filtro por tipo — ${KIND_DESCRIPTION}`),
       tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       author: z.string().optional().describe('Filtro por autor'),
+      issue: z.string().optional().describe('Filtro por issue (sin importar mayúsculas ni espacios)'),
     },
-    async ({ app, kind, tags, author }) => {
+    async ({ app, kind, tags, author, issue }) => {
       try {
-        const notes = await listNotes(prisma, { app, kind, tags, author })
+        const notes = await listNotes(prisma, { app, kind, tags, author, issue })
         // Excluye body_md para compactar la respuesta en listados
         const compact = notes.map(({ body_md: _, ...rest }) => rest)
         return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] }
