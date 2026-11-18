@@ -34,7 +34,7 @@ Retomo un ticket              → cortex_list o cortex_search con issue=<ID>
 Encontré algo relevante      → cortex_read (la nota completa, no el snippet)
 Aprendí algo que el equipo debe saber:
    ¿ya existe?               → cortex_update (reason; y base_rev si la leí antes)
-   ¿no existe?               → cortex_write (author + app + kind)
+   ¿no existe?               → cortex_write (app + kind; author opcional: se infiere del header x-cortex-author, nombre del cliente MCP, o 'agente')
 Una nota está mal o sobra    → cortex_delete (author + reason)
 ```
 
@@ -55,7 +55,7 @@ primera nota de un sistema; si algo no encaja en los cinco tipos, se propone por
 | `app` | Llave del sistema: el producto (`console`, `omnisales-pos`, `licitapro`, `general`…) |
 | `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` — cinco, sin `otro` |
 | `tags` | Con prefijo: `area:`, `repo:`, `stack:`, `env:` (los valores, en la nota de convención); `origen:` lo reserva el importador |
-| `author` | Quién escribe (**obligatorio** en toda escritura) |
+| `author` | Quién escribe. Obligatorio en `cortex_delete`; opcional en `cortex_write`/`cortex_update` (cadena: argumento > header `x-cortex-author` > nombre del cliente MCP > `agente`). |
 | `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) |
 
 `kind` no es decorativo: `regla` es lo que se lista al empezar una tarea en esa app, `pitfall` es lo que

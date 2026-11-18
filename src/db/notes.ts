@@ -101,7 +101,7 @@ export type CreateInput = {
   kind: string
   tags?: string[]
   author: string
-  issue?: string
+  issue?: string | null
   force?: boolean
   reason?: string
 }
@@ -325,13 +325,14 @@ export async function createNote(
   const id = generateUlid()
   const tags = input.tags ?? []
   const vector = await embed(input.title + ' ' + input.body_md)
+  const issue = input.issue?.trim() ? input.issue : null
 
   if (!input.force) {
     const T = duplicateThreshold()
     const candidates = await findDuplicates(
       prisma,
       vector,
-      { kind: input.kind, issue: input.issue, title: input.title },
+      { kind: input.kind, issue: issue ?? undefined, title: input.title },
       T,
     )
     if (candidates.length > 0) {
@@ -351,7 +352,7 @@ export async function createNote(
         kind: input.kind,
         tags,
         author: input.author,
-        issue: input.issue ?? null,
+        issue: issue,
         force_reason: input.force ? (input.reason!.trim()) : null,
       },
     })
