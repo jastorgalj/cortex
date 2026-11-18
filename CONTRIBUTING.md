@@ -21,6 +21,8 @@ bun run dev                   # http://localhost:3091
 Variables: `DATABASE_URL` (obligatoria), `PORT` (por defecto 3091) y `MODEL_CACHE_DIR` (opcional: dónde
 se guarda el modelo ONNX; por defecto `~/.model-cache/knowledge-mcp`). El primer arranque descarga y
 carga el modelo (puede tardar unos minutos) y `GET /health` reporta `model_loaded`.
+`MCP_SESSION_TTL_MINUTES` (opcional, defecto 1440) fija cuántos minutos de inactividad aguanta una
+sesión MCP antes de que el barrido la cierre.
 
 > **Aplicá migraciones con `migrate deploy`, no con `migrate dev`.** Las migraciones incluyen SQL a mano
 > que el datamodel no puede expresar (índice HNSW del embedding e índice parcial de `deleted_at`).
@@ -99,6 +101,11 @@ que dos escrituras simultáneas no se pisen:
   de «nombre único» ni fusiones automáticas: el humano decide.
 - **Los tests no tocan la base compartida.** `test/preload.ts` apunta siempre a un Postgres local
   (`cortex_test` en `127.0.0.1:5433`) y no lee el `DATABASE_URL` del `.env`.
+- **Reintentos ante fallos transitorios.** `src/db/client.ts` exporta `prisma` (un `Proxy` sobre
+  `rawPrisma` que reintenta con `withDbRetry`): lecturas y escrituras reintentan cuando la consulta no
+  llegó a ejecutarse (sin conexión, pool agotado); P1017 (conexión cortada) solo en lecturas, para no
+  duplicar escrituras. Presupuesto 200/500/1000 ms con tope de 8 s. Agotado, lanzan `DbUnavailableError`
+  con mensaje fijo. `/health` usa `rawPrisma` y **no** reintenta: contesta rápido con su propio timeout.
 
 ## Configuración de la base
 

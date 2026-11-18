@@ -166,6 +166,27 @@ curl http://localhost:3091/health
 POST/PUT/PATCH/DELETE en `/api` responde 405, así que la validación, la deduplicación y el historial
 de revisiones no se pueden saltar.
 
+## Si el contenedor aparece `unhealthy`
+
+El healthcheck de Compose (`docker-compose.yml`) y del `Dockerfile` pide `200` con `status: "ok"` en
+`GET /health`. Cuando la base de datos no responde, el servidor responde **503** con
+`{"status":"degraded","db":"down","error":"base de datos no disponible"}` (el mensaje real queda en el
+log del servidor, nunca en el cuerpo) y el contenedor pasa a `unhealthy`. Qué significa y qué hacer:
+
+1. **`unhealthy` no reinicia nada.** `restart: always` o `unless-stopped` solo relanzan el proceso si
+   muere; un contenedor `unhealthy` sigue corriendo. No hace falta reiniciarlo para que se recupere.
+2. **La causa más común es la base**, no el servidor: Postgres caído, una pausa de red o el pool de
+   conexiones agotado. Revisá `docker logs <contenedor>`: el `[cortex] health probe error` dice el
+   motivo real.
+3. **Cuando la base vuelve, el servidor se recupera solo** (Prisma reabre las conexiones) y `/health`
+   vuelve a `200` en menos de un minuto, sin reiniciar el contenedor. Si no vuelve, ahí sí `docker
+   restart`.
+4. **`/health` tiene timeout propio (3 s) y un solo sondeo compartido.** Con la base colgada responde
+   `503` rápido en vez de quedarse esperando, y decenas de requests simultáneas no agotan el pool.
+   Los reintentos de las tools no aplican a `/health`: este endpoint nunca reintenta, contesta de
+   inmediato. `MCP_SESSION_TTL_MINUTES` (opcional, 1440 por defecto) controla cuánto dura una sesión
+   MCP inactiva antes de que el barrido la cierre.
+
 ## Licencia
 
 **Apache License 2.0** — ver [LICENSE](LICENSE). Se puede usar, modificar y redistribuir, incluso
