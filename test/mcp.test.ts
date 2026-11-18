@@ -224,6 +224,57 @@ describe('MCP server — cortex tools', () => {
     await client.close()
   })
 
+  test('cortex_write de una bitácora la crea y devuelve warnings (issue #15)', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const result = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'Cierre XYZ-7: MR !95 mergeado',
+        body_md: 'Se mergeó el MR !95, se desplegó a dev y se cerró el ticket. Registro de actividad.',
+        app: 'general',
+        kind: 'decision',
+        author: 'mcp-test',
+        force: true,
+        reason: 'datos de test: bypass de similitud',
+      },
+    })
+
+    const data = parseToolResult(result) as { id?: string; warnings?: string[] }
+    expect(data.id).toBeTruthy() // se creó igual: la advertencia no bloquea
+    expect(Array.isArray(data.warnings)).toBe(true)
+    expect(data.warnings?.some((w) => w.includes('bitácora'))).toBe(true)
+
+    await client.close()
+  })
+
+  test('cortex_write de una nota bien formada no devuelve warnings (no-regresión)', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const result = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'El listado de reglas filtra por app y kind exactos, nunca por prefijo',
+        body_md:
+          'Las reglas de una app se consultan con app y kind, ambos exactos. ' +
+          'No hay búsqueda por prefijo de app: cartera no trae cartera-uf.',
+        app: 'general',
+        kind: 'regla',
+        author: 'mcp-test',
+        force: true,
+        reason: 'datos de test: bypass de similitud',
+      },
+    })
+
+    const data = parseToolResult(result) as { id?: string; warnings?: string[] }
+    expect(data.id).toBeTruthy()
+    expect(data.warnings).toBeUndefined()
+
+    await client.close()
+  })
+
   test('cortex_read de id inexistente devuelve error descriptivo', async () => {
     const client = makeClient()
     await connectClient(client)

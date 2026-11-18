@@ -138,6 +138,70 @@ describe('createNote', () => {
   }, 60_000)
 })
 
+// ─── createNote — modo estricto para bitácoras (issue #15) ───────────────────
+
+describe('createNote — bitácoras y modo estricto', () => {
+  test('por defecto la bitácora se crea (la advertencia la da la tool, no la BD)', async () => {
+    const result = await createNote(prisma, {
+      title: 'Cierre ABC-1: MR !93 mergeado',
+      body_md: 'Se mergeó el MR !93 y se desplegó a dev. Nada reutilizable, solo registro de actividad.',
+      app: 'general',
+      kind: 'decision',
+      author: 'tester',
+      force: true,
+      reason: 'bypass similitud: datos de test',
+    })
+    expect(result.status).toBe('created')
+  }, 120_000)
+
+  test('con CORTEX_STRICT_NOTES la bitácora se rechaza con ValidationError', async () => {
+    const before = await prisma.note.count()
+    process.env.CORTEX_STRICT_NOTES = '1'
+    try {
+      let caughtErr: unknown = null
+      try {
+        await createNote(prisma, {
+          title: 'Cierre ABC-2: MR !94 mergeado',
+          body_md: 'Registro de actividad del cierre del ticket.',
+          app: 'general',
+          kind: 'regla',
+          author: 'tester',
+          force: true,
+          reason: 'bypass similitud: datos de test',
+        })
+      } catch (err) {
+        caughtErr = err
+      }
+      expect(caughtErr).toBeInstanceOf(ValidationError)
+      expect((caughtErr as ValidationError).field).toBe('title')
+      expect((caughtErr as ValidationError).message).toContain('bitácora')
+      expect(await prisma.note.count()).toBe(before)
+    } finally {
+      delete process.env.CORTEX_STRICT_NOTES
+    }
+  }, 120_000)
+
+  test('con CORTEX_STRICT_NOTES una nota de conocimiento se crea igual', async () => {
+    process.env.CORTEX_STRICT_NOTES = '1'
+    try {
+      const result = await createNote(prisma, {
+        title: 'El dedupe compara el título además del coseno',
+        body_md:
+          'El criterio de duplicado combina coseno del embedding y similitud de título, ' +
+          'porque dos notas del mismo issue con títulos casi iguales son duplicado aunque el coseno no llegue.',
+        app: 'general',
+        kind: 'regla',
+        author: 'tester',
+        force: true,
+        reason: 'bypass similitud: datos de test',
+      })
+      expect(result.status).toBe('created')
+    } finally {
+      delete process.env.CORTEX_STRICT_NOTES
+    }
+  }, 120_000)
+})
+
 // ─── readNote ─────────────────────────────────────────────────────────────────
 
 describe('readNote', () => {

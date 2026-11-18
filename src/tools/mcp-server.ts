@@ -21,6 +21,7 @@ import {
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/constants.ts'
+import { noteWarnings } from '../db/note-quality.ts'
 import { SessionRegistry } from './sessions.ts'
 import { TOOL_ALIASES, normalizeToolArgs, resolveAuthor } from './args.ts'
 
@@ -42,6 +43,16 @@ const KIND_DESCRIPTION = NOTE_KINDS.map(
 ).join('; ')
 
 // ─── Tool registration ────────────────────────────────────────────────────────
+
+/**
+ * Serializa la nota agregando `warnings` solo cuando hay algo que advertir: una
+ * nota bien formada devuelve exactamente el JSON de siempre (sin campo extra).
+ * No bloqueante — la nota ya se creó/actualizó.
+ */
+function withWarnings(note: object, warnings: string[]): string {
+  if (warnings.length === 0) return JSON.stringify(note, null, 2)
+  return JSON.stringify({ ...note, warnings }, null, 2)
+}
 
 function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_search ──────────────────────────────────────────────────────────
@@ -103,7 +114,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_write ───────────────────────────────────────────────────────────
   server.tool(
     'cortex_write',
-    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente.',
+    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente. La nota creada puede volver con un campo warnings (no bloqueante) si el contenido parece bitácora o no calza con su kind.',
     {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
@@ -181,7 +192,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
             ],
           }
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result.note, null, 2) }] }
+        return { content: [{ type: 'text', text: withWarnings(result.note, noteWarnings(result.note)) }] }
       } catch (err) {
         if (err instanceof ValidationError) {
           return {
@@ -272,7 +283,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           reason,
           base_rev,
         })
-        return { content: [{ type: 'text', text: JSON.stringify(note, null, 2) }] }
+        return { content: [{ type: 'text', text: withWarnings(note, noteWarnings(note)) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {
