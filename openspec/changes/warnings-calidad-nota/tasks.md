@@ -12,7 +12,8 @@
 - [x] 2.1 `validateCreate` rechaza la bitácora con `ValidationError` cuando `CORTEX_STRICT_NOTES` está activo
       (después de las validaciones de campos obligatorios)
 - [x] 2.2 `cortex_write` y `cortex_update` agregan `warnings` a la respuesta sólo cuando hay avisos
-      (`withWarnings` en `src/tools/mcp-server.ts`)
+      (`withWarnings` en `src/tools/mcp-server.ts`), sumados a los warnings de vocabulario de `app` que
+      ya emite la capa de datos (un solo campo para el agente)
 - [x] 2.3 Descripción de `cortex_write` menciona el campo `warnings`
 
 ## 3. Documentación
@@ -27,5 +28,6 @@
       conocimiento creada en modo estricto
 - [x] 4.3 `test/mcp.test.ts` — `cortex_write` de bitácora devuelve `warnings`; nota bien formada no lo trae
 - [x] 4.4 `bun run typecheck` sin errores
-- [x] 4.5 `bun run test`: 260 pass / 3 fail; los 3 fallos (`health`, `shutdown`) se reproducen igual en un
-      worktree limpio de `origin/main` — son de ambiente (timeouts de 3 s), no de este cambio
+- [x] 4.5 `bun run test` (tras mergear `main` con #22): 276 pass / 3 fail; los 3 fallos (`health`,
+      `shutdown`) se reproducen igual en un worktree limpio de `origin/main` — son de ambiente (timeouts de
+      3 s), no de este cambio

@@ -64,7 +64,7 @@ describe('Sesión desconocida responde 404 JSON-RPC', () => {
     expect(body.id).toBeNull()
   })
 
-  test('tras initialize, el id nuevo permite tools/list con las 7 tools', async () => {
+  test('tras initialize, el id nuevo permite tools/list con las 8 tools', async () => {
     // 1. initialize sin id
     const initRes = await fetch(MCP_URL, {
       method: 'POST',
@@ -94,6 +94,7 @@ describe('Sesión desconocida responde 404 JSON-RPC', () => {
     const listBody = (await listRes.json()) as { result: { tools: Array<{ name: string }> } }
     const names = listBody.result.tools.map((t) => t.name).sort()
     expect(names).toEqual([
+      'cortex_apps',
       'cortex_delete',
       'cortex_history',
       'cortex_list',

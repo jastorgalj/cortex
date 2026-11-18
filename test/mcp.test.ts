@@ -84,7 +84,7 @@ function kindProperty(inputSchema: unknown): KindProperty {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('MCP server — cortex tools', () => {
-  test('tools/list devuelve exactamente las siete tools nombradas (todas con prefijo cortex_)', async () => {
+  test('tools/list devuelve exactamente las ocho tools nombradas (todas con prefijo cortex_)', async () => {
     const client = makeClient()
     await connectClient(client)
 
@@ -92,6 +92,7 @@ describe('MCP server — cortex tools', () => {
     const names = tools.map((t) => t.name).sort()
 
     expect(names).toEqual([
+      'cortex_apps',
       'cortex_delete',
       'cortex_history',
       'cortex_list',

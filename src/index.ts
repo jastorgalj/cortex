@@ -3,8 +3,9 @@
  */
 import { Elysia, t } from 'elysia'
 import { prisma, rawPrisma } from './db/client.ts'
-import { listNotes, readNote, NotFoundError } from './db/notes.ts'
+import { listNotes, readNote, countNotesByApp, NotFoundError } from './db/notes.ts'
 import { hybridSearch } from './db/search.ts'
+import { getAppConfig, GENERAL_APP } from './db/apps.ts'
 import { isModelLoaded, warmup } from './db/embeddings.ts'
 import { handleMcpRequest, getActiveSessions, closeAllSessions, sweepIdleSessions } from './tools/mcp-server.ts'
 import { renderNoteList, renderNote } from './web/views.ts'
@@ -57,18 +58,31 @@ export function createApp(opts: AppOptions = {}): Elysia {
   app.get(
     '/api/search',
     async ({ query }) => {
-      const { q, app: appFilter, kind, limit, issue, tags: tagsStr } = query
+      const { q, app: appFilter, kind, limit, issue, tags: tagsStr, include_general } = query
       if (!q) return { error: "El parametro 'q' es requerido" }
       // tags=a,b,c → array sin vacíos
       const tags = tagsStr
         ? tagsStr.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
         : undefined
-      return hybridSearch(prisma, q, { app: appFilter, kind, issue, tags }, Number(limit) || 10)
+      return hybridSearch(
+        prisma,
+        q,
+        {
+          app: appFilter,
+          // `include_general=false` es el único valor que excluye la app transversal.
+          include_general: include_general === undefined ? undefined : include_general !== 'false',
+          kind,
+          issue,
+          tags,
+        },
+        Number(limit) || 10,
+      )
     },
     {
       query: t.Object({
         q: t.Optional(t.String()),
         app: t.Optional(t.String()),
+        include_general: t.Optional(t.String()),
         kind: t.Optional(t.String()),
         limit: t.Optional(t.String()),
         issue: t.Optional(t.String()),
@@ -76,6 +90,19 @@ export function createApp(opts: AppOptions = {}): Elysia {
       }),
     },
   )
+
+  /** Descubrimiento del vocabulario: apps en uso con su conteo + lista canónica. */
+  app.get('/api/apps', async () => {
+    const config = getAppConfig()
+    return {
+      apps: await countNotesByApp(prisma),
+      vocabulary: {
+        canonicas: [...new Set([...config.apps, GENERAL_APP])],
+        modo: config.mode,
+        aliases: config.aliases,
+      },
+    }
+  })
 
   app.get('/api/notes/:id', async ({ params: { id }, set }) => {
     try {

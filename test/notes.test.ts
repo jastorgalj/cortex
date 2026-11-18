@@ -558,11 +558,17 @@ describe('listNotes', () => {
       author: 'tester',
     })
 
+    // `general` es transversal: filtros por app la incluyen salvo include_general: false
     const dfNotes = await listNotes(prisma, { app: 'cartera' })
-    expect(dfNotes.every((n) => n.app === 'cartera')).toBe(true)
+    expect(dfNotes.some((n) => n.app === 'cartera')).toBe(true)
+    expect(dfNotes.every((n) => n.app === 'cartera' || n.app === 'general')).toBe(true)
 
     const bioNotes = await listNotes(prisma, { app: 'huella' })
-    expect(bioNotes.every((n) => n.app === 'huella')).toBe(true)
+    expect(bioNotes.some((n) => n.app === 'huella')).toBe(true)
+    expect(bioNotes.every((n) => n.app === 'huella' || n.app === 'general')).toBe(true)
+
+    const onlyCartera = await listNotes(prisma, { app: 'cartera', include_general: false })
+    expect(onlyCartera.every((n) => n.app === 'cartera')).toBe(true)
   }, 60_000)
 
   test('filtro kind=regla devuelve solo reglas', async () => {
@@ -580,7 +586,7 @@ describe('listNotes', () => {
 
     const reglas = await listNotes(prisma, { app: 'cartera', kind: 'regla' })
     expect(reglas.length).toBeGreaterThan(0)
-    expect(reglas.every((n) => n.kind === 'regla' && n.app === 'cartera')).toBe(true)
+    expect(reglas.every((n) => n.kind === 'regla' && (n.app === 'cartera' || n.app === 'general'))).toBe(true)
   }, 60_000)
 })
 
