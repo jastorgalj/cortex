@@ -298,6 +298,7 @@ describe('MCP server — cortex tools', () => {
         kind: 'otro',
         author: 'mcp-test',
         force: true,
+        reason: 'bypass similitud: datos de test',
       },
     })
 
@@ -331,6 +332,7 @@ describe('MCP server — cortex tools', () => {
         kind: 'pitfall',
         author: 'mcp-test',
         force: true,
+        reason: 'bypass similitud: datos de test',
       },
     })
     const created = parseToolResult(writeResult) as { id: string; rev: number; kind: string }
@@ -481,6 +483,7 @@ describe('cortex_update issue:null y cortex_search tags (5.5)', () => {
         kind: 'regla',
         author: 'mcp-test',
         force: true,
+        reason: 'fixture de test',
       },
     })
     const created = parseToolResult(writeResult) as { id: string; rev: number }
@@ -522,6 +525,7 @@ describe('cortex_update issue:null y cortex_search tags (5.5)', () => {
         author: 'mcp-test',
         tags: ['area:test-mcp'],
         force: true,
+        reason: 'fixture de test',
       },
     })
     const noteWithTag = parseToolResult(withTagResult) as { id: string }
@@ -536,6 +540,7 @@ describe('cortex_update issue:null y cortex_search tags (5.5)', () => {
         kind: 'regla',
         author: 'mcp-test',
         force: true,
+        reason: 'fixture de test',
       },
     })
 
@@ -590,6 +595,7 @@ describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
         author: 'mcp-test',
         issue: 'MCP-ISS-1',
         force: true,
+        reason: 'fixture de test',
       },
     })
     const d1 = parseToolResult(r1) as { id: string }
@@ -605,6 +611,7 @@ describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
         author: 'mcp-test',
         issue: 'MCP-ISS-2',
         force: true,
+        reason: 'fixture de test',
       },
     })
     const d2 = parseToolResult(r2) as { id: string }
@@ -647,6 +654,70 @@ describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
     expect(ids).toContain(noteMcpIss1Id)
     // Si se quita issue de listNotes en mcp-server.ts:300, ISS-2 aparece — falla aquí
     expect(ids).not.toContain(noteMcpIss2Id)
+
+    await client.close()
+  })
+})
+
+describe('MCP: force con reason (task 4.5 iv)', () => {
+  test('cortex_write con force: true sin reason → isError con "reason" en el texto', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const result = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'Nota de test para force sin reason',
+        body_md: 'Contenido de test para verificar que force sin reason lanza error.',
+        app: 'general',
+        kind: 'regla',
+        author: 'mcp-test',
+        force: true,
+        // sin reason
+      },
+    })
+    expect((result as { isError?: boolean }).isError).toBe(true)
+    expect(textOf(result)).toContain('reason')
+
+    await client.close()
+  })
+
+  test('cortex_write con force: true y reason → nota creada; cortex_read y cortex_list traen force_reason', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const writeResult = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'Nota de test para force con reason (MCP)',
+        body_md: 'Contenido de test para verificar que force con reason persiste el motivo.',
+        app: 'general',
+        kind: 'regla',
+        author: 'mcp-test',
+        force: true,
+        reason: 'es una nota de test, no un duplicado',
+      },
+    })
+    expect((writeResult as { isError?: boolean }).isError).toBeFalsy()
+    const created = parseToolResult(writeResult) as { id: string; force_reason?: string }
+    expect(created.force_reason).toBe('es una nota de test, no un duplicado')
+
+    // cortex_read trae force_reason
+    const readResult = await client.callTool({
+      name: 'cortex_read',
+      arguments: { id: created.id },
+    })
+    const read = parseToolResult(readResult) as { force_reason?: string }
+    expect(read.force_reason).toBe('es una nota de test, no un duplicado')
+
+    // cortex_list trae force_reason
+    const listResult = await client.callTool({
+      name: 'cortex_list',
+      arguments: { app: 'general' },
+    })
+    const list = parseToolResult(listResult) as Array<{ id: string; force_reason?: string }>
+    const found = list.find((n) => n.id === created.id)
+    expect(found?.force_reason).toBe('es una nota de test, no un duplicado')
 
     await client.close()
   })

@@ -205,6 +205,7 @@ async function importFile(opts: {
       author,
       issue,
       force: true, // Importacion: siempre crear aunque haya similares (distintos repositorios pueden tener overlap)
+      reason: 'importación inicial desde ' + tag,
     })
 
     if (result.status === 'created') {

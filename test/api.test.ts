@@ -129,6 +129,28 @@ describe('GET /api/search — coincide con cortex_search', () => {
     const r = await fetch(`${BASE_URL}/api/notes/01JZZZZZZZZZZZZZZZZZZZZZZZ`)
     expect(r.status).toBe(404)
   })
+
+  test('GET /api/notes/:id devuelve force_reason cuando la nota fue creada con force (task 4.5 v)', async () => {
+    // Crea una nota con force + reason via createNote directo
+    const { createNote } = await import('../src/db/notes.ts')
+    const r = await createNote(prisma, {
+      title: 'Nota con force reason para test API',
+      body_md: 'Contenido para verificar que force_reason aparece en la API REST.',
+      app: 'general',
+      kind: 'regla',
+      author: 'api-test',
+      force: true,
+      reason: 'test api force_reason',
+    })
+    expect(r.status).toBe('created')
+    if (r.status !== 'created') return
+    const noteId = r.note.id
+
+    const res = await fetch(`${BASE_URL}/api/notes/${noteId}`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { force_reason?: string }
+    expect(body.force_reason).toBe('test api force_reason')
+  })
 })
 
 // ─── No hay escritura fuera de /mcp ───────────────────────────────────────────
@@ -228,6 +250,7 @@ describe('GET /api/search — filtros issue y tags (5.7)', () => {
         issue: 'API-1',
         tags: ['area:x'],
         force: true,
+        reason: 'fixture de test',
       },
     })
     const dataA = JSON.parse(((rA.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
@@ -244,6 +267,7 @@ describe('GET /api/search — filtros issue y tags (5.7)', () => {
         issue: 'API-1',
         tags: ['area:x', 'repo:y'],
         force: true,
+        reason: 'fixture de test',
       },
     })
     const dataB = JSON.parse(((rB.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
@@ -259,6 +283,7 @@ describe('GET /api/search — filtros issue y tags (5.7)', () => {
         author: 'api-test-5.7',
         issue: 'API-1',
         force: true,
+        reason: 'fixture de test',
       },
     })
     const dataC = JSON.parse(((rC.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}
@@ -275,6 +300,7 @@ describe('GET /api/search — filtros issue y tags (5.7)', () => {
         author: 'api-test-5.7',
         issue: 'API-2',
         force: true,
+        reason: 'fixture de test',
       },
     })
     const dataD = JSON.parse(((rD.content as Array<{type:string;text?:string}>).find(c => c.type==='text')?.text) ?? '{}') as {id:string}

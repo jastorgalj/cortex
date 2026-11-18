@@ -121,6 +121,7 @@ describe('createNote', () => {
         kind: 'otro',
         author: 'tester',
         force: true,
+        reason: 'bypass similitud: datos de test',
       })
     } catch (err) {
       caughtErr = err
@@ -247,6 +248,7 @@ describe('updateNote', () => {
       kind: 'pitfall',
       author: 'autor-a',
       force: true, // evita el aviso de similitud con otras notas del mismo suite
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -279,6 +281,7 @@ describe('updateNote', () => {
       kind: 'pitfall',
       author: 'autor-a',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -321,6 +324,7 @@ describe('updateNote', () => {
       kind: 'pitfall',
       author: 'autor-a',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -345,6 +349,7 @@ describe('updateNote', () => {
       kind: 'regla',
       author: 'autor-a',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -402,6 +407,7 @@ describe('softDelete — la revisión avanza y la nota recuperada se puede actua
       kind: 'flujo',
       author: 'autor-inicial',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -437,6 +443,7 @@ describe('softDelete — la revisión avanza y la nota recuperada se puede actua
       kind: 'sistema',
       author: 'autor-original',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -503,6 +510,7 @@ describe('listNotes', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
 
@@ -524,6 +532,7 @@ describe('lexicalSearch (task 1.4)', () => {
       kind: 'flujo',
       author: 'tester',
       force: true,
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -549,6 +558,7 @@ describe('lexicalSearch (task 1.4)', () => {
       kind: 'sistema',
       author: 'tester',
       force: true,  // evita bloqueo por similitud con otras notas del mismo suite
+      reason: 'bypass similitud: datos de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const id = r.note.id
@@ -582,6 +592,7 @@ describe('listNotes — filtro issue (5.4)', () => {
       author: 'tester',
       issue: 'PROJ-1',
       force: true,
+      reason: 'fixture de test',
     })
     if (a.status !== 'created') throw new Error('No se creó nota A')
     idP1A = a.note.id
@@ -594,6 +605,7 @@ describe('listNotes — filtro issue (5.4)', () => {
       author: 'tester',
       issue: 'PROJ-1',
       force: true,
+      reason: 'fixture de test',
     })
     if (b.status !== 'created') throw new Error('No se creó nota B')
     idP1B = b.note.id
@@ -606,6 +618,7 @@ describe('listNotes — filtro issue (5.4)', () => {
       author: 'tester',
       issue: 'PROJ-10',
       force: true,
+      reason: 'fixture de test',
     })
     if (c.status !== 'created') throw new Error('No se creó nota C')
     idP2 = c.note.id
@@ -617,6 +630,7 @@ describe('listNotes — filtro issue (5.4)', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'fixture de test',
     })
     if (d.status !== 'created') throw new Error('No se creó nota D')
     idNoIssue = d.note.id
@@ -662,6 +676,7 @@ describe('listNotes — filtro issue (5.4)', () => {
       issue: 'PROJ-1',
       tags: ['test-combo'],
       force: true,
+      reason: 'fixture de test',
     })
     if (e.status !== 'created') throw new Error('No se creó nota E')
     const idWithTag = e.note.id
@@ -686,6 +701,7 @@ describe('updateNote — campo issue (5.4)', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const { id, rev } = r.note
@@ -711,6 +727,7 @@ describe('updateNote — campo issue (5.4)', () => {
       author: 'tester',
       issue: 'ISS-100',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const { id } = r.note
@@ -733,6 +750,7 @@ describe('updateNote — campo issue (5.4)', () => {
       author: 'tester',
       issue: 'ISS-101',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const { id, rev } = r.note
@@ -751,6 +769,7 @@ describe('updateNote — campo issue (5.4)', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const { id, rev } = r.note
@@ -779,6 +798,7 @@ describe('updateNote — campo issue (5.4)', () => {
       kind: 'regla',
       author: 'tester',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó')
     const { id } = r.note
@@ -814,6 +834,7 @@ describe('índice notes_issue_idx (5.6)', () => {
       author: 'tester',
       issue: 'IDX-TEST-1',
       force: true,
+      reason: 'fixture de test',
     })
     if (r.status !== 'created') throw new Error('No se creó nota para test EXPLAIN')
 

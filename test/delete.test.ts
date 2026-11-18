@@ -94,6 +94,7 @@ async function createTestNote(client: Client, suffix = ''): Promise<string> {
         tags: ['test-delete'],
         author: 'delete-test',
         force: true,
+        reason: 'bypass similitud: datos de test',
       },
     })
     const fd = parseToolResult(forced) as { id: string }

@@ -18,9 +18,10 @@ bunx prisma migrate deploy
 bun run dev                   # http://localhost:3091
 ```
 
-Variables: `DATABASE_URL` (obligatoria), `PORT` (por defecto 3091) y `MODEL_CACHE_DIR` (opcional: dónde
-se guarda el modelo ONNX; por defecto `~/.model-cache/knowledge-mcp`). El primer arranque descarga y
-carga el modelo (puede tardar unos minutos) y `GET /health` reporta `model_loaded`.
+Variables: `DATABASE_URL` (obligatoria), `PORT` (por defecto 3091), `MODEL_CACHE_DIR` (opcional: dónde
+se guarda el modelo ONNX; por defecto `~/.model-cache/knowledge-mcp`) y `CORTEX_DUPLICATE_THRESHOLD`
+(opcional: coseno mínimo para avisar de duplicado, número entre 0 y 1 con punto decimal; vacía o ausente = 0.75).
+El primer arranque descarga y carga el modelo (puede tardar unos minutos) y `GET /health` reporta `model_loaded`.
 `MCP_SESSION_TTL_MINUTES` (opcional, defecto 1440) fija cuántos minutos de inactividad aguanta una
 sesión MCP antes de que el barrido la cierre.
 
@@ -97,8 +98,9 @@ que dos escrituras simultáneas no se pisen:
 - **Borrado lógico.** `cortex_delete` marca `deleted_at` y exige `author` + `reason`; no hay `DELETE`
   físico, así que un borrado no rompe referencias ni revisiones.
 - **Deduplicación que avisa, no bloquea.** Antes de crear, el servidor responde `similar_exists` con las
-  candidatas (similitud ≥ `DUPLICATE_THRESHOLD`, 0.55); crear igual requiere `force: true`. No hay locks
-  de «nombre único» ni fusiones automáticas: el humano decide.
+  candidatas (coseno ≥ umbral configurable `CORTEX_DUPLICATE_THRESHOLD`, default 0.75, o mismo issue con
+  título casi igual); crear igual requiere `force: true` con `reason` obligatorio. No hay locks de «nombre
+  único» ni fusiones automáticas: el humano decide.
 - **Los tests no tocan la base compartida.** `test/preload.ts` apunta siempre a un Postgres local
   (`cortex_test` en `127.0.0.1:5433`) y no lee el `DATABASE_URL` del `.env`.
 - **Reintentos ante fallos transitorios.** `src/db/client.ts` exporta `prisma` (un `Proxy` sobre

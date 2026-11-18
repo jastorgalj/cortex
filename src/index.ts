@@ -11,6 +11,7 @@ import { renderNoteList, renderNote } from './web/views.ts'
 import { createHealthProbe } from './health.ts'
 import { parseSessionTtlMinutes } from './tools/sessions.ts'
 import { createShutdown } from './shutdown.ts'
+import { duplicateThreshold } from './db/constants.ts'
 
 export const PORT = Number(process.env.PORT ?? 3091)
 
@@ -133,6 +134,8 @@ export function createApp(opts: AppOptions = {}): Elysia {
 }
 
 if (import.meta.main) {
+  const threshold = duplicateThreshold()
+  console.log('[cortex] Umbral de duplicados: ' + threshold)
   console.log('[cortex] Calentando modelo ONNX (warmup)...')
   await warmup()
   console.log('[cortex] Modelo listo. Iniciando servidor en :' + PORT)

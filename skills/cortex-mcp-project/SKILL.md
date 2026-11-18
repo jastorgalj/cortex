@@ -114,13 +114,15 @@ entrega, no hay colaboradores.
 
 ## Tests: los fixtures están acoplados por similitud
 
-`createNote` consulta duplicados semánticos (`DUPLICATE_THRESHOLD` 0.55) antes de insertar, así que
+`createNote` consulta duplicados semánticos antes de insertar; el umbral vigente sale de
+`duplicateThreshold()` (0.75 por defecto, configurable con `CORTEX_DUPLICATE_THRESHOLD`). Así que
 **cambiar el texto de un fixture puede volverlo "duplicado" de otro** y el test falla con
 `if (r.status !== 'created') throw new Error('No se creó')` — parece un bug de lógica y es el
 umbral de deduplicación. Reglas:
 
-- Si `createNote` devuelve `similar_exists`, usá `force: true` (convención ya presente en el
-  archivo) o cambiá el fixture de tema, no el umbral del producto.
+- Si `createNote` devuelve `similar_exists`, usá `force: true` con `reason` obligatorio (convención
+  ya presente en el archivo) o cambiá el fixture de tema, no el umbral del producto.
+- `force: true` exige un `reason` no vacío: añadirlo a los fixtures que lo usen.
 - Un cambio de vocabulario en los fixtures (anonimizar, renombrar dominios) puede mover la
   similitud arriba o abajo: corré **el archivo completo**, no `bun test -t '<test>'`. Un `-t` pasa
   porque no crea los fixtures anteriores y esconde exactamente esta clase de fallo.

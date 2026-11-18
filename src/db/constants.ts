@@ -1,14 +1,39 @@
 /**
- * Umbrales y constantes del núcleo — sin flags de configuración.
- * Los valores vienen de medición real sobre contenido del equipo (Decisión 4 y 5).
+ * Umbrales y constantes del núcleo — el umbral de duplicados es configurable
+ * por variable de entorno; los demás vienen de medición real (Decisión 4 y 5).
  */
 import { Prisma } from '@prisma/client'
 
 /** Similarity coseno por debajo de la cual el resultado semántico se descarta antes de fusionar. */
 export const SEMANTIC_DISCARD_THRESHOLD = 0.25
 
-/** Similitud coseno a partir de la cual una nota candidata se considera duplicado. */
-export const DUPLICATE_THRESHOLD = 0.55
+/** Umbral de duplicados por defecto (0.75). Sobrescribible con CORTEX_DUPLICATE_THRESHOLD. */
+export const DEFAULT_DUPLICATE_THRESHOLD = 0.75
+
+/** Margen de coseno adicional cuando el candidato y la nota nueva difieren en kind o issue. */
+export const DUPLICATE_DISTINCT_MARGIN = 0.1
+
+/** Similitud de título (pg_trgm) a partir de la cual mismo-issue marca como duplicado. */
+export const TITLE_SIMILARITY_THRESHOLD = 0.6
+
+/**
+ * Lee el umbral de duplicados del entorno.
+ * - Ausente o cadena vacía → 0.75 (DEFAULT_DUPLICATE_THRESHOLD).
+ * - No finito, ≤ 0 o > 1 → lanza Error con CORTEX_DUPLICATE_THRESHOLD, el valor y pista de formato.
+ */
+export function duplicateThreshold(env: Record<string, string | undefined> = process.env): number {
+  const raw = env['CORTEX_DUPLICATE_THRESHOLD']
+  if (raw === undefined || raw === '') return DEFAULT_DUPLICATE_THRESHOLD
+  const trimmed = raw.trim()
+  if (trimmed === '') return DEFAULT_DUPLICATE_THRESHOLD
+  const value = Number(trimmed)
+  if (!isFinite(value) || value <= 0 || value > 1) {
+    throw new Error(
+      `CORTEX_DUPLICATE_THRESHOLD="${raw}" no es un número válido entre 0 (excluido) y 1 (incluido). Usá punto decimal (ej. 0.75).`,
+    )
+  }
+  return value
+}
 
 /** Parámetro k de Reciprocal Rank Fusion (valor estándar bibliográfico). */
 export const RRF_K = 60

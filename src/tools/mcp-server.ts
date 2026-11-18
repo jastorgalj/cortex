@@ -20,7 +20,7 @@ import {
   ConflictError,
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
-import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS } from '../db/constants.ts'
+import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/constants.ts'
 import { SessionRegistry } from './sessions.ts'
 
 /** Versión del paquete: `package.json` es la fuente, no un literal que envejece. */
@@ -102,7 +102,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_write ───────────────────────────────────────────────────────────
   server.tool(
     'cortex_write',
-    'Crea una nueva nota de conocimiento. Si existen notas muy similares (similitud ≥ 0.55), responde con status similar_exists y los candidatos; usa force: true para crear igualmente.',
+    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente.',
     {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
@@ -117,9 +117,15 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       force: z
         .boolean()
         .optional()
-        .describe('Forzar creación aunque existan similares (default false)'),
+        .describe('Forzar creación aunque existan similares (default false). Exige reason.'),
+      reason: z
+        .string()
+        .optional()
+        .describe(
+          'Obligatorio con force: true: por qué esta nota no es un duplicado de las candidatas. Queda guardado en la nota.',
+        ),
     },
-    async ({ title, body_md, app, kind, tags, author, issue, force }) => {
+    async ({ title, body_md, app, kind, tags, author, issue, force, reason }) => {
       if (!author?.trim()) {
         return {
           content: [
@@ -141,8 +147,10 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           author,
           issue,
           force,
+          reason,
         })
         if (result.status === 'similar_exists') {
+          const umbral = duplicateThreshold()
           return {
             content: [
               {
@@ -151,9 +159,9 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
                   {
                     status: 'similar_exists',
                     message:
-                      'Se encontraron notas muy similares (similitud ≥ 0.55). ' +
+                      `Se encontraron notas muy similares (umbral coseno: ${umbral}, o mismo issue con título casi igual). ` +
                       'Para fusionar el contenido nuevo con una nota existente, usa cortex_update sobre el id candidato. ' +
-                      'Para crear la nota igualmente (aceptando posible duplicado), reintenta con force: true.',
+                      'Para crear la nota igualmente (aceptando posible duplicado), reintenta con force: true y reason explicando por qué no es un duplicado.',
                     candidates: result.candidates,
                   },
                   null,
