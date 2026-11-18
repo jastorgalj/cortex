@@ -1,5 +1,5 @@
 /**
- * src/tools/mcp-server.ts — MCP server con siete tools, transporte HTTP streamable.
+ * src/tools/mcp-server.ts — MCP server con ocho tools, transporte HTTP streamable.
  * Usa WebStandardStreamableHTTPServerTransport (nativo Bun/Web API).
  * Un transport por sesión; session map en memoria.
  */
@@ -13,6 +13,7 @@ import {
   readNote,
   updateNote,
   listNotes,
+  countNotesByApp,
   getNoteHistory,
   softDeleteNote,
   ValidationError,
@@ -20,6 +21,7 @@ import {
   ConflictError,
 } from '../db/notes.ts'
 import { hybridSearch } from '../db/search.ts'
+import { getAppConfig, GENERAL_APP } from '../db/apps.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/constants.ts'
 import { SessionRegistry } from './sessions.ts'
 import { TOOL_ALIASES, normalizeToolArgs, resolveAuthor } from './args.ts'
@@ -41,16 +43,38 @@ const KIND_DESCRIPTION = NOTE_KINDS.map(
   (kind) => `${kind}: ${NOTE_KIND_DESCRIPTIONS[kind]}`,
 ).join('; ')
 
+/**
+ * Descripción del campo `app` compuesta desde el vocabulario configurado: si el server
+ * declara `CORTEX_APPS`, el agente ve los valores válidos en vez de adivinarlos.
+ */
+const APP_DESCRIPTION = (() => {
+  const config = getAppConfig()
+  if (config.apps.length === 0) {
+    return 'App a la que pertenece (cartera, huella, general, ...). Se normaliza a minúsculas; `general` es la app transversal.'
+  }
+  const valid = [...new Set([...config.apps, GENERAL_APP])].join(', ')
+  return `App a la que pertenece — valores válidos: ${valid}. Se normaliza a minúsculas; \`general\` es transversal.`
+})()
+
 // ─── Tool registration ────────────────────────────────────────────────────────
 
 function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_search ──────────────────────────────────────────────────────────
   server.tool(
     'cortex_search',
-    'Búsqueda híbrida (léxica + semántica con fusión RRF) en Cortex. Devuelve notas ordenadas por relevancia con id, título, snippet, score, origen e issue.',
+    'Búsqueda híbrida (léxica + semántica con fusión RRF) en Cortex. Devuelve notas ordenadas por relevancia con id, título, snippet, score, origen, app e issue.',
     {
       q: z.string().describe('Términos de búsqueda (lenguaje natural o identificadores exactos)'),
-      app: z.string().optional().describe('Filtro por app (cartera, huella, general, ...)'),
+      app: z
+        .string()
+        .optional()
+        .describe(
+          'Filtro por app. Incluye por defecto las notas de `general` (transversal); usa include_general: false para excluirlas.',
+        ),
+      include_general: z
+        .boolean()
+        .optional()
+        .describe('Filtra solo la app pedida, sin las notas de `general` (default true: sí las incluye)'),
       kind: z
         .enum(NOTE_KINDS)
         .optional()
@@ -59,9 +83,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       limit: z.number().int().min(1).max(50).optional().describe('Máximo de resultados (default 10)'),
     },
-    async ({ q, app, kind, issue, tags, limit }) => {
+    async ({ q, app, include_general, kind, issue, tags, limit }) => {
       try {
-        const results = await hybridSearch(prisma, q, { app, kind, issue, tags }, limit ?? 10)
+        const results = await hybridSearch(
+          prisma,
+          q,
+          { app, include_general, kind, issue, tags },
+          limit ?? 10,
+        )
         return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -107,7 +136,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
     {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
-      app: z.string().describe("App a la que pertenece (cartera, huella, general, ...)"),
+      app: z.string().describe(APP_DESCRIPTION),
       kind: z.enum(NOTE_KINDS).describe(`Tipo de nota — ${KIND_DESCRIPTION}`),
       tags: z.array(z.string()).optional().describe('Tags'),
       author: z.string().optional().describe('Autor de la nota (argumento > header x-cortex-author > nombre del cliente MCP > agente; un author inferido no es un author declarado). Obligatorio en cortex_delete.'),
@@ -181,7 +210,11 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
             ],
           }
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result.note, null, 2) }] }
+        // `warnings` no vacío = la app se guardó con un valor fuera del vocabulario
+        // (modo warn). Va junto a la nota para que el agente lo vea y corrija.
+        const payload =
+          result.warnings.length > 0 ? { ...result.note, warnings: result.warnings } : result.note
+        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
       } catch (err) {
         if (err instanceof ValidationError) {
           return {
@@ -212,7 +245,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       app: z
         .string()
         .optional()
-        .describe('Nueva app, para corregir la clasificación (no vacía; omite para no cambiar)'),
+        .describe(`${APP_DESCRIPTION} Omite para no cambiar.`),
       kind: z
         .enum(NOTE_KINDS)
         .optional()
@@ -311,9 +344,16 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_list ────────────────────────────────────────────────────────────
   server.tool(
     'cortex_list',
-    'Lista notas no borradas con filtros opcionales. Ordenadas por updated_at descendente. No incluye el body_md para mantener la respuesta compacta.',
+    'Lista notas no borradas con filtros opcionales. Ordenadas por updated_at descendente. No incluye el body_md para mantener la respuesta compacta. Al filtrar por app incluye `general`.',
     {
-      app: z.string().optional().describe('Filtro por app'),
+      app: z
+        .string()
+        .optional()
+        .describe('Filtro por app. Incluye por defecto las notas de `general` (transversal)'),
+      include_general: z
+        .boolean()
+        .optional()
+        .describe('Con `app`, lista solo esa app sin las notas de `general` (default true: sí las incluye)'),
       kind: z
         .enum(NOTE_KINDS)
         .optional()
@@ -322,15 +362,50 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       author: z.string().optional().describe('Filtro por autor'),
       issue: z.string().optional().describe('Filtro por issue (sin importar mayúsculas ni espacios)'),
     },
-    async ({ app, kind, tags, author, issue }) => {
+    async ({ app, include_general, kind, tags, author, issue }) => {
       try {
-        const notes = await listNotes(prisma, { app, kind, tags, author, issue })
+        const notes = await listNotes(prisma, { app, include_general, kind, tags, author, issue })
         // Excluye body_md para compactar la respuesta en listados
         const compact = notes.map(({ body_md: _, ...rest }) => rest)
         return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_list: ${msg}` }], isError: true }
+      }
+    },
+  )
+
+  // ── cortex_apps ────────────────────────────────────────────────────────────
+  server.tool(
+    'cortex_apps',
+    'Descubre el vocabulario de apps en uso: cada app con su cantidad de notas no borradas, más la lista canónica configurada. Úsala para clasificar una nota nueva sin inventar un valor.',
+    {},
+    async () => {
+      try {
+        const apps = await countNotesByApp(prisma)
+        const config = getAppConfig()
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  apps,
+                  vocabulary: {
+                    canonicas: [...new Set([...config.apps, GENERAL_APP])],
+                    modo: config.mode,
+                    aliases: config.aliases,
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error en cortex_apps: ${msg}` }], isError: true }
       }
     },
   )

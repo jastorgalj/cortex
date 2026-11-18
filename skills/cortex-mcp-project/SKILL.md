@@ -148,7 +148,7 @@ No borres `prisma/migrations/` para "empezar limpio": hay una sola migración y 
 Prisma pierde `vector`, el HNSW, el índice parcial y el trigger FTS.
 
 Smoke contra la base real: `GET /health` (`model_loaded: true`), `GET /` (200), MCP
-`initialize` + `tools/list` (7 tools `cortex_*`). Las tools usan `q`, no `query`.
+`initialize` + `tools/list` (8 tools `cortex_*`). Las tools usan `q`, no `query`.
 
 ## Distribución: imagen publicada y skill sin clonar
 
