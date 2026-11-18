@@ -23,6 +23,7 @@ import {
 import { hybridSearch } from '../db/search.ts'
 import { getAppConfig, GENERAL_APP } from '../db/apps.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/constants.ts'
+import { noteWarnings } from '../db/note-quality.ts'
 import { SessionRegistry } from './sessions.ts'
 import { TOOL_ALIASES, normalizeToolArgs, resolveAuthor } from './args.ts'
 
@@ -57,6 +58,16 @@ const APP_DESCRIPTION = (() => {
 })()
 
 // ─── Tool registration ────────────────────────────────────────────────────────
+
+/**
+ * Serializa la nota agregando `warnings` solo cuando hay algo que advertir: una
+ * nota bien formada devuelve exactamente el JSON de siempre (sin campo extra).
+ * No bloqueante — la nota ya se creó/actualizó.
+ */
+function withWarnings(note: object, warnings: string[]): string {
+  if (warnings.length === 0) return JSON.stringify(note, null, 2)
+  return JSON.stringify({ ...note, warnings }, null, 2)
+}
 
 function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_search ──────────────────────────────────────────────────────────
@@ -132,7 +143,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_write ───────────────────────────────────────────────────────────
   server.tool(
     'cortex_write',
-    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente.',
+    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente. La nota creada puede volver con un campo warnings (no bloqueante) si el contenido parece bitácora o no calza con su kind.',
     {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
@@ -210,11 +221,10 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
             ],
           }
         }
-        // `warnings` no vacío = la app se guardó con un valor fuera del vocabulario
-        // (modo warn). Va junto a la nota para que el agente lo vea y corrija.
-        const payload =
-          result.warnings.length > 0 ? { ...result.note, warnings: result.warnings } : result.note
-        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+        // Warnings de dos fuentes: el vocabulario de `app` (capa de datos) y la
+        // calidad del contenido (heurísticas). Un solo campo para el agente.
+        const warnings = [...result.warnings, ...noteWarnings(result.note)]
+        return { content: [{ type: 'text', text: withWarnings(result.note, warnings) }] }
       } catch (err) {
         if (err instanceof ValidationError) {
           return {
@@ -305,7 +315,10 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           reason,
           base_rev,
         })
-        return { content: [{ type: 'text', text: JSON.stringify(note, null, 2) }] }
+        // `updateNote` puede traer los warnings del vocabulario de `app` en el DTO:
+        // se suman a los de calidad del contenido en el mismo campo.
+        const warnings = [...(note.warnings ?? []), ...noteWarnings(note)]
+        return { content: [{ type: 'text', text: withWarnings(note, warnings) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {

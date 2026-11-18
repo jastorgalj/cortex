@@ -56,6 +56,17 @@ Tres reglas que hacen que la memoria no se degrade:
 - **Borrar es lógico y deja huella:** exige autor y motivo, la nota desaparece de búsquedas y
   listados, y el historial muestra quién la borró y por qué.
 
+Dos señales más, no bloqueantes, sobre la **calidad de lo guardado** (`cortex_write` y `cortex_update`
+devuelven `warnings` cuando aplican; una nota bien formada no lo trae):
+
+- **Bitácoras.** Un título de registro de actividad (`Cierre …`, `Sesión …`, `Log …`), una referencia
+  `MR !N` / `PR #N` en el título o una fecha al inicio del título o del cuerpo se advierten: Cortex
+  guarda conocimiento reutilizable, no el registro de lo que pasó. Con `CORTEX_STRICT_NOTES=1` la
+  escritura se rechaza (`ValidationError`) en vez de advertir.
+- **Contenido que no calza con su `kind`.** `decision` sin motivo ni alternativa descartada, `pitfall`
+  sin causa o sin arreglo, `flujo` sin lista de pasos: el warning incluye el esqueleto esperado
+  (tomado de la descripción del tipo).
+
 ## Qué puede hacer tu agente
 
 | Tool | Para qué |

@@ -10,6 +10,7 @@ import {
 import { generateUlid } from './ulid.ts'
 import { embed } from './embeddings.ts'
 import { resolveApp, appFilterValues } from './apps.ts'
+import { isJournalNote, isStrictNotesMode, journalField } from './note-quality.ts'
 
 // ─── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -190,6 +191,16 @@ function validateCreate(input: CreateInput): void {
   }
   if (input.force && !input.reason?.trim()) {
     throw new ValidationError('El campo reason es requerido cuando force es true', 'reason')
+  }
+  // Modo estricto opt-in: por defecto la bitácora entra con una advertencia (tool),
+  // con CORTEX_STRICT_NOTES la capa de datos la rechaza.
+  if (isStrictNotesMode() && isJournalNote(input.title, input.body_md)) {
+    throw new ValidationError(
+      'el contenido parece una bitácora (registro de actividad), no conocimiento reutilizable. ' +
+        'Guardá la decisión, la regla o el pitfall que deja el trabajo; ' +
+        'o quitá CORTEX_STRICT_NOTES para permitir bitácoras con advertencia.',
+      journalField(input.title, input.body_md),
+    )
   }
 }
 
