@@ -403,3 +403,251 @@ describe('MCP server — cortex tools', () => {
     await client.close()
   })
 })
+
+// ─── Schemas de tools declaran issue/tags (task 5.5) ─────────────────────────
+
+describe('tools/list — issue y tags en schemas (5.5)', () => {
+  test('cortex_search declara issue y tags en inputSchema', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const toolsResult = await client.listTools()
+    const searchTool = toolsResult.tools.find((t) => t.name === 'cortex_search')
+    expect(searchTool).toBeDefined()
+
+    const props = (searchTool!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(props['issue']).toBeDefined()
+    expect(props['tags']).toBeDefined()
+    // tags debe ser un array
+    expect((props['tags'] as { type?: string }).type).toBe('array')
+
+    await client.close()
+  })
+
+  test('cortex_list declara issue en inputSchema', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const toolsResult = await client.listTools()
+    const listTool = toolsResult.tools.find((t) => t.name === 'cortex_list')
+    expect(listTool).toBeDefined()
+
+    const props = (listTool!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(props['issue']).toBeDefined()
+
+    await client.close()
+  })
+
+  test('cortex_update declara issue con tipo string y null en inputSchema', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const toolsResult = await client.listTools()
+    const updateTool = toolsResult.tools.find((t) => t.name === 'cortex_update')
+    expect(updateTool).toBeDefined()
+
+    const props = (updateTool!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(props['issue']).toBeDefined()
+    // issue debe aceptar string o null (anyOf o nullable)
+    const issueProp = props['issue'] as Record<string, unknown>
+    // Puede ser { anyOf: [{type:'string'},{type:'null'}] } o { type: ['string','null'] }
+    const hasStringAndNull =
+      (Array.isArray(issueProp['anyOf']) &&
+        (issueProp['anyOf'] as Array<Record<string, unknown>>).some((t) => t['type'] === 'string') &&
+        (issueProp['anyOf'] as Array<Record<string, unknown>>).some((t) => t['type'] === 'null')) ||
+      (Array.isArray(issueProp['type']) &&
+        (issueProp['type'] as string[]).includes('string') &&
+        (issueProp['type'] as string[]).includes('null'))
+    expect(hasStringAndNull).toBe(true)
+
+    await client.close()
+  })
+})
+
+// ─── cortex_update con issue null y cortex_search con tags (task 5.5) ─────────
+
+describe('cortex_update issue:null y cortex_search tags (5.5)', () => {
+  test('cortex_update {issue:null} quita el issue existente', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    // Crea nota con issue
+    const writeResult = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota con issue para borrar vía MCP ${Date.now()}`,
+        body_md: 'Configuración del módulo de crédito hipotecario en cartera con issue asignado para test de borrado por null en cortex_update.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'mcp-test',
+        force: true,
+      },
+    })
+    const created = parseToolResult(writeResult) as { id: string; rev: number }
+    expect(created.rev).toBe(1)
+
+    // Actualiza con issue inicial
+    const withIssue = await client.callTool({
+      name: 'cortex_update',
+      arguments: { id: created.id, issue: 'MCP-TEST-1', author: 'mcp-test', reason: 'asignar issue' },
+    })
+    const afterSet = parseToolResult(withIssue) as { issue: string; rev: number }
+    expect(afterSet.issue).toBe('MCP-TEST-1')
+    expect(afterSet.rev).toBe(2)
+
+    // Ahora quita el issue con null
+    const withNull = await client.callTool({
+      name: 'cortex_update',
+      arguments: { id: created.id, issue: null, author: 'mcp-test', reason: 'quitar issue' },
+    })
+    const afterNull = parseToolResult(withNull) as { issue: string | null; rev: number }
+    expect(afterNull.issue).toBeNull()
+    expect(afterNull.rev).toBe(3)
+
+    await client.close()
+  })
+
+  test('cortex_search {tags} filtra (bug #14: antes devolvía todo)', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    // Crea nota CON tag area:test-mcp
+    const withTagResult = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota con tag area:test-mcp para filtro ${Date.now()}`,
+        body_md: 'Regla de tasas de interés diferenciadas para préstamos de largo plazo en la financiera con tag de área de test para validar el filtro por tags en cortex_search.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'mcp-test',
+        tags: ['area:test-mcp'],
+        force: true,
+      },
+    })
+    const noteWithTag = parseToolResult(withTagResult) as { id: string }
+
+    // Crea nota SIN tag (mismo tema para que aparezca en búsqueda)
+    await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota sin tag area:test-mcp para filtro ${Date.now()}`,
+        body_md: 'Configuración de tasas de interés diferenciadas para créditos hipotecarios en la financiera sin tag de área para validar que el filtro la excluye en cortex_search.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'mcp-test',
+        force: true,
+      },
+    })
+
+    // Busca sin filtro: ambas deben aparecer
+    const noFilterResult = await client.callTool({
+      name: 'cortex_search',
+      arguments: { q: 'tasas diferenciadas financiera', app: 'cartera' },
+    })
+    const noFilterIds = (parseToolResult(noFilterResult) as Array<{ id: string }>).map((r) => r.id)
+    expect(noFilterIds).toContain(noteWithTag.id)
+
+    // Busca CON filtro tags: solo la nota con el tag debe aparecer
+    const tagFilterResult = await client.callTool({
+      name: 'cortex_search',
+      arguments: { q: 'tasas diferenciadas financiera', app: 'cartera', tags: ['area:test-mcp'] },
+    })
+    const tagFilterIds = (parseToolResult(tagFilterResult) as Array<{ id: string }>).map((r) => r.id)
+    expect(tagFilterIds).toContain(noteWithTag.id)
+    // La nota SIN tag no debe aparecer
+    // (si aparece, el filtro no funciona — era el bug #14)
+    for (const id of tagFilterIds) {
+      if (id !== noteWithTag.id) {
+        // Verificar que no es la nota sin tag
+        const readResult = await client.callTool({ name: 'cortex_read', arguments: { id } })
+        const note = parseToolResult(readResult) as { tags?: string[] }
+        expect(note.tags ?? []).toContain('area:test-mcp')
+      }
+    }
+
+    await client.close()
+  })
+})
+
+// ─── cortex_search/cortex_list con filtro issue via MCP (task 5.5 / bloqueantes R1) ───
+
+describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
+  let noteMcpIss1Id = ''  // issue: MCP-ISS-1
+  let noteMcpIss2Id = ''  // issue: MCP-ISS-2 — para verificar exclusión
+
+  beforeAll(async () => {
+    // Arranca un cliente solo para setup de fixtures
+    const client = makeClient()
+    await connectClient(client)
+
+    const r1 = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota MCP-ISS-1 hipotecario ${Date.now()}`,
+        body_md: 'Configuración del módulo hipotecario en cartera con issue MCP-ISS-1 para verificar el filtro por issue en cortex_search y cortex_list via MCP.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'mcp-test',
+        issue: 'MCP-ISS-1',
+        force: true,
+      },
+    })
+    const d1 = parseToolResult(r1) as { id: string }
+    noteMcpIss1Id = d1.id
+
+    const r2 = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: `Nota MCP-ISS-2 hipotecario ${Date.now()}`,
+        body_md: 'Configuración del módulo hipotecario en cartera con issue MCP-ISS-2 para verificar que el filtro por issue excluye correctamente en cortex_search y cortex_list via MCP.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'mcp-test',
+        issue: 'MCP-ISS-2',
+        force: true,
+      },
+    })
+    const d2 = parseToolResult(r2) as { id: string }
+    noteMcpIss2Id = d2.id
+
+    await client.close()
+    console.log(`[mcp.test 5.5] noteMcpIss1Id=${noteMcpIss1Id}, noteMcpIss2Id=${noteMcpIss2Id}`)
+  }, 15 * 60 * 1000)
+
+  test('cortex_search {q, issue:"mcp-iss-1"} incluye ISS-1 y excluye ISS-2 (case-insensitive)', async () => {
+    // Verifica el camino: src/tools/mcp-server.ts:62 → hybridSearch(prisma, q, { issue })
+    const client = makeClient()
+    await connectClient(client)
+
+    const result = await client.callTool({
+      name: 'cortex_search',
+      arguments: { q: 'modulo hipotecario cartera', issue: 'mcp-iss-1' },
+    })
+    const ids = (parseToolResult(result) as Array<{ id: string }>).map((r) => r.id)
+
+    expect(ids).toContain(noteMcpIss1Id)
+    // Si se quita issue de hybridSearch en mcp-server.ts:62, ISS-2 aparece — falla aquí
+    expect(ids).not.toContain(noteMcpIss2Id)
+
+    await client.close()
+  })
+
+  test('cortex_list {issue:"MCP-ISS-1"} incluye ISS-1 y excluye ISS-2 via MCP tool', async () => {
+    // Verifica el camino: src/tools/mcp-server.ts:300 → listNotes(prisma, { issue })
+    const client = makeClient()
+    await connectClient(client)
+
+    const result = await client.callTool({
+      name: 'cortex_list',
+      arguments: { issue: 'MCP-ISS-1' },
+    })
+    const data = parseToolResult(result) as Array<{ id: string }>
+    const ids = data.map((r) => r.id)
+
+    expect(ids).toContain(noteMcpIss1Id)
+    // Si se quita issue de listNotes en mcp-server.ts:300, ISS-2 aparece — falla aquí
+    expect(ids).not.toContain(noteMcpIss2Id)
+
+    await client.close()
+  })
+})

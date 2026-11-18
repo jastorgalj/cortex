@@ -563,3 +563,269 @@ describe('lexicalSearch (task 1.4)', () => {
     expect(after.some((r) => r.id === id)).toBe(false)
   }, 60_000)
 })
+
+// ─── listNotes con filtro issue (task 5.4) ────────────────────────────────────
+
+describe('listNotes — filtro issue (5.4)', () => {
+  // Crea notas de fixture con issues distintos antes de este grupo
+  let idP1A = ''
+  let idP1B = ''
+  let idP2 = ''
+  let idNoIssue = ''
+
+  beforeAll(async () => {
+    const a = await createNote(prisma, {
+      title: 'Nota con issue PROJ-1 primera variante única cartera',
+      body_md: 'Configuración de tasas de interés para préstamos PROJ-1 en la financiera con cálculo diferenciado por plazo y categoría de cliente.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      issue: 'PROJ-1',
+      force: true,
+    })
+    if (a.status !== 'created') throw new Error('No se creó nota A')
+    idP1A = a.note.id
+
+    const b = await createNote(prisma, {
+      title: 'Nota con issue PROJ-1 segunda variante única cartera',
+      body_md: 'Regla de amortización de créditos PROJ-1 en la financiera: el saldo pendiente se recalcula con tipo de cambio oficial del día del pago parcial anticipado.',
+      app: 'cartera',
+      kind: 'flujo',
+      author: 'tester',
+      issue: 'PROJ-1',
+      force: true,
+    })
+    if (b.status !== 'created') throw new Error('No se creó nota B')
+    idP1B = b.note.id
+
+    const c = await createNote(prisma, {
+      title: 'Nota con issue PROJ-10 primera variante única cartera',
+      body_md: 'Verificación de identidad PROJ-10 para operaciones en módulo cartera de la financiera con validación documental y biométrica.',
+      app: 'cartera',
+      kind: 'flujo',
+      author: 'tester',
+      issue: 'PROJ-10',
+      force: true,
+    })
+    if (c.status !== 'created') throw new Error('No se creó nota C')
+    idP2 = c.note.id
+
+    const d = await createNote(prisma, {
+      title: 'Nota sin issue para test listNotes filtro',
+      body_md: 'Regla de acceso general al sistema cartera de la financiera sin issue asociado para verificar que el filtro no incluye notas sin issue.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      force: true,
+    })
+    if (d.status !== 'created') throw new Error('No se creó nota D')
+    idNoIssue = d.note.id
+  }, 15 * 60 * 1000)
+
+  test('issue "PROJ-1" devuelve solo las notas de PROJ-1', async () => {
+    const results = await listNotes(prisma, { issue: 'PROJ-1' })
+    const ids = results.map((n) => n.id)
+    expect(ids).toContain(idP1A)
+    expect(ids).toContain(idP1B)
+    // PROJ-10 NO debe aparecer (no es prefijo)
+    expect(ids).not.toContain(idP2)
+    // Nota sin issue NO debe aparecer
+    expect(ids).not.toContain(idNoIssue)
+  }, 60_000)
+
+  test('issue "proj-1" (minúsculas) trae las mismas notas que "PROJ-1"', async () => {
+    const upper = await listNotes(prisma, { issue: 'PROJ-1' })
+    const lower = await listNotes(prisma, { issue: 'proj-1' })
+    expect(lower.map((n) => n.id).sort()).toEqual(upper.map((n) => n.id).sort())
+  }, 60_000)
+
+  test('issue " PROJ-1 " (con espacios) trae las mismas notas que "PROJ-1"', async () => {
+    const clean = await listNotes(prisma, { issue: 'PROJ-1' })
+    const withSpaces = await listNotes(prisma, { issue: ' PROJ-1 ' })
+    expect(withSpaces.map((n) => n.id).sort()).toEqual(clean.map((n) => n.id).sort())
+  }, 60_000)
+
+  test('issue en blanco ("") devuelve lo mismo que sin filtro', async () => {
+    const noFilter = await listNotes(prisma)
+    const blankFilter = await listNotes(prisma, { issue: '' })
+    expect(blankFilter.map((n) => n.id).sort()).toEqual(noFilter.map((n) => n.id).sort())
+  }, 60_000)
+
+  test('issue combinado con tags devuelve intersección', async () => {
+    // Crear nota con PROJ-1 y tags=[test-combo]
+    const e = await createNote(prisma, {
+      title: 'Nota PROJ-1 con tag test-combo para verificar combinación',
+      body_md: 'Regla combinada de PROJ-1 en cartera para verificar la intersección de filtros: issue y tag simultáneos en la consulta de listado.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      issue: 'PROJ-1',
+      tags: ['test-combo'],
+      force: true,
+    })
+    if (e.status !== 'created') throw new Error('No se creó nota E')
+    const idWithTag = e.note.id
+
+    const results = await listNotes(prisma, { issue: 'PROJ-1', tags: ['test-combo'] })
+    const ids = results.map((n) => n.id)
+    expect(ids).toContain(idWithTag)
+    // idP1A y idP1B tienen PROJ-1 pero no test-combo
+    expect(ids).not.toContain(idP1A)
+    expect(ids).not.toContain(idP1B)
+  }, 60_000)
+})
+
+// ─── updateNote con issue (task 5.4) ─────────────────────────────────────────
+
+describe('updateNote — campo issue (5.4)', () => {
+  test('issue nuevo: rev+1, historial conserva rev 1', async () => {
+    const r = await createNote(prisma, {
+      title: 'Nota para updateNote issue único test cartera',
+      body_md: 'Configuración inicial del módulo de préstamos para cartera sin issue asociado que se va a actualizar en el test de issue.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const { id, rev } = r.note
+    expect(rev).toBe(1)
+
+    // Actualiza con issue nuevo
+    const updated = await updateNote(prisma, id, { issue: 'ISS-99', author: 'tester', reason: 'asignar issue' })
+    expect(updated.rev).toBe(2)
+    expect(updated.issue).toBe('ISS-99')
+
+    // Historial conserva rev 1 (sin issue)
+    const history = await getNoteHistory(prisma, id)
+    expect(history.length).toBe(1)
+    expect(history[0]!.rev).toBe(1)
+  }, 60_000)
+
+  test('issue null quita el issue existente: rev+1, historial conserva anterior', async () => {
+    const r = await createNote(prisma, {
+      title: 'Nota con issue para quitar con null en test cartera',
+      body_md: 'Regla de tasas para cartera con issue ISS-100 que se va a quitar con null en el test de updateNote issue.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      issue: 'ISS-100',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const { id } = r.note
+
+    const updated = await updateNote(prisma, id, { issue: null, author: 'tester', reason: 'quitar issue' })
+    expect(updated.issue).toBeNull()
+    expect(updated.rev).toBe(2)
+
+    const history = await getNoteHistory(prisma, id)
+    expect(history.length).toBe(1)
+    expect(history[0]!.rev).toBe(1)
+  }, 60_000)
+
+  test('issue omitido no cambia el issue: rev sin cambio si no hay otros cambios', async () => {
+    const r = await createNote(prisma, {
+      title: 'Nota con issue para test omitido en cartera sistema',
+      body_md: 'Flujo de aprobación de crédito para cartera con issue ISS-101 que no debe cambiar al omitir el campo issue en updateNote.',
+      app: 'cartera',
+      kind: 'flujo',
+      author: 'tester',
+      issue: 'ISS-101',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const { id, rev } = r.note
+
+    // Actualiza kind (sin tocar issue)
+    const updated = await updateNote(prisma, id, { kind: 'regla', author: 'tester' })
+    expect(updated.rev).toBe(rev + 1)
+    expect(updated.issue).toBe('ISS-101') // issue no cambió
+  }, 60_000)
+
+  test('issue "" (vacío) lanza ValidationError nombrando issue y null', async () => {
+    const r = await createNote(prisma, {
+      title: 'Nota para rechazar issue vacío en updateNote test cartera',
+      body_md: 'Regla de amortización anticipada en cartera para verificar que el campo issue rechaza string vacío con ValidationError.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const { id, rev } = r.note
+
+    await expect(
+      updateNote(prisma, id, { issue: '', author: 'tester' })
+    ).rejects.toMatchObject({ name: 'ValidationError', field: 'issue' })
+
+    // Rev sin cambio, historial sin cambio
+    const note = await readNote(prisma, id)
+    expect(note.rev).toBe(rev)
+    const history = await getNoteHistory(prisma, id)
+    expect(history.length).toBe(0) // nota recién creada, sin revisiones previas
+
+    // El mensaje menciona "issue" y "null" — aserción incondicional con rejects.toThrow
+    await expect(
+      updateNote(prisma, id, { issue: '', author: 'tester' })
+    ).rejects.toThrow(/issue.*null/i)
+  }, 60_000)
+
+  test('issue "   " (solo espacios) lanza ValidationError', async () => {
+    const r = await createNote(prisma, {
+      title: 'Nota para rechazar issue espacios en updateNote test cartera',
+      body_md: 'Configuración de cartera para verificar que el campo issue rechaza string con solo espacios en blanco con ValidationError.',
+      app: 'cartera',
+      kind: 'regla',
+      author: 'tester',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+    const { id } = r.note
+
+    await expect(
+      updateNote(prisma, id, { issue: '   ', author: 'tester' })
+    ).rejects.toMatchObject({ name: 'ValidationError', field: 'issue' })
+  }, 60_000)
+})
+
+// ─── Índice notes_issue_idx (task 5.6) ────────────────────────────────────────
+
+describe('índice notes_issue_idx (5.6)', () => {
+  test('el índice notes_issue_idx existe con expresión lower(btrim(issue))', async () => {
+    const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE indexname = 'notes_issue_idx'
+    `
+    expect(rows.length).toBe(1)
+    // La definición debe contener lower(btrim(issue))
+    const def = rows[0]!.indexdef.toLowerCase()
+    expect(def).toContain('lower')
+    expect(def).toContain('btrim')
+    expect(def).toContain('issue')
+  }, 30_000)
+
+  test('EXPLAIN con enable_seqscan=off usa notes_issue_idx', async () => {
+    // Crear una nota con issue conocido para que el filtro exista
+    const r = await createNote(prisma, {
+      title: 'Nota para test EXPLAIN índice issue cartera única',
+      body_md: 'Verificación del plan de ejecución para confirmar el uso del índice notes_issue_idx en la consulta de filtrado por issue en la financiera.',
+      app: 'cartera',
+      kind: 'sistema',
+      author: 'tester',
+      issue: 'IDX-TEST-1',
+      force: true,
+    })
+    if (r.status !== 'created') throw new Error('No se creó nota para test EXPLAIN')
+
+    // Usar $transaction para que el SET y el EXPLAIN compartan sesión
+    const explainRows = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET enable_seqscan = off`
+      return tx.$queryRaw<{ 'QUERY PLAN': string }[]>`
+        EXPLAIN SELECT id FROM notes
+        WHERE deleted_at IS NULL AND lower(btrim(issue)) = lower(${'IDX-TEST-1'})
+      `
+    })
+    const plan = explainRows.map((r) => r['QUERY PLAN']).join('\n')
+    expect(plan).toContain('notes_issue_idx')
+  }, 30_000)
+})

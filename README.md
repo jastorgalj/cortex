@@ -41,7 +41,7 @@ para todo el equipo, así que no hay `pull`, ni ramas de conocimiento, ni confli
 | `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` |
 | `tags` | Libres. Los que empiezan con `origen:` los reserva el importador |
 | `author` | Quién la escribe. **Obligatorio** en toda escritura |
-| `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) |
+| `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) — se puede filtrar con `cortex_list` y `cortex_search`, y corregir con `cortex_update` |
 
 Tres reglas que hacen que la memoria no se degrade:
 
@@ -57,11 +57,11 @@ Tres reglas que hacen que la memoria no se degrade:
 
 | Tool | Para qué |
 |---|---|
-| `cortex_search` | Búsqueda híbrida (léxica + semántica). Filtros opcionales por `app`, `kind` y tags |
+| `cortex_search` | Búsqueda híbrida (léxica + semántica). Filtros opcionales por `app`, `kind`, `issue` y `tags` (AND) |
 | `cortex_read` | Leer una nota completa por id |
 | `cortex_write` | Crear una nota. Detecta duplicados; `force: true` para crear igual |
-| `cortex_update` | Actualizar una nota, con `reason` y la revisión que se leyó, opcionales |
-| `cortex_list` | Listar notas con filtros (`app`, `kind`, tags, autor) |
+| `cortex_update` | Actualizar una nota; puede corregir o quitar `issue` con `reason` y la revisión que se leyó, opcionales |
+| `cortex_list` | Listar notas con filtros (`app`, `kind`, tags, autor, `issue`) |
 | `cortex_history` | Historial de revisiones de una nota |
 | `cortex_delete` | Borrar una nota (lógico). Exige `author` y `reason`; queda en el historial |
 
