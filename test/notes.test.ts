@@ -260,7 +260,7 @@ describe('updateNote', () => {
       reason: 'segunda revisión',
     })
 
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history).toHaveLength(2)
     expect(history[0]!.rev).toBe(1)
     expect(history[1]!.rev).toBe(2)
@@ -331,7 +331,7 @@ describe('updateNote', () => {
     // La nota quedó en rev 2 (una sola escritura aplicada) y con historial de la versión previa
     const after = await readNote(prisma, id)
     expect(after.rev).toBe(2)
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.length).toBe(1)
   }, 90_000)
 
@@ -363,7 +363,7 @@ describe('updateNote', () => {
     expect(updated.rev).toBe(2)
 
     // El historial conserva la revisión 1 con el contenido y la autoría originales
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history).toHaveLength(1)
     expect(history[0]!.rev).toBe(1)
     expect(history[0]!.author).toBe('autor-a')
@@ -400,7 +400,7 @@ describe('updateNote', () => {
     const after = await readNote(prisma, id)
     expect(after.kind).toBe('pitfall')
     expect(after.rev).toBe(1)
-    expect(await getNoteHistory(prisma, id)).toHaveLength(0)
+    expect((await getNoteHistory(prisma, id)).items).toHaveLength(0)
   }, 90_000)
 
   test('rechaza app vacío en la actualización sin modificar la nota', async () => {
@@ -425,7 +425,7 @@ describe('updateNote', () => {
     const after = await readNote(prisma, id)
     expect(after.app).toBe('cartera')
     expect(after.rev).toBe(1)
-    expect(await getNoteHistory(prisma, id)).toHaveLength(0)
+    expect((await getNoteHistory(prisma, id)).items).toHaveLength(0)
   }, 90_000)
 })
 
@@ -495,7 +495,7 @@ describe('softDelete — la revisión avanza y la nota recuperada se puede actua
     expect(after.is_deleted).toBe(true)
     expect(after.rev).toBe(4)
 
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.map((h) => h.rev)).toEqual([1, 2, 3])
   }, 90_000)
 
@@ -540,7 +540,7 @@ describe('softDelete — la revisión avanza y la nota recuperada se puede actua
     expect(updated.rev).toBe(4)
     expect(updated.body_md).toContain('cuarenta y cinco días')
 
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.map((h) => h.rev)).toEqual([1, 2, 3])
   }, 90_000)
 })
@@ -783,7 +783,7 @@ describe('updateNote — campo issue (5.4)', () => {
     expect(updated.issue).toBe('ISS-99')
 
     // Historial conserva rev 1 (sin issue)
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.length).toBe(1)
     expect(history[0]!.rev).toBe(1)
   }, 60_000)
@@ -806,7 +806,7 @@ describe('updateNote — campo issue (5.4)', () => {
     expect(updated.issue).toBeNull()
     expect(updated.rev).toBe(2)
 
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.length).toBe(1)
     expect(history[0]!.rev).toBe(1)
   }, 60_000)
@@ -851,7 +851,7 @@ describe('updateNote — campo issue (5.4)', () => {
     // Rev sin cambio, historial sin cambio
     const note = await readNote(prisma, id)
     expect(note.rev).toBe(rev)
-    const history = await getNoteHistory(prisma, id)
+    const { items: history } = await getNoteHistory(prisma, id)
     expect(history.length).toBe(0) // nota recién creada, sin revisiones previas
 
     // El mensaje menciona "issue" y "null" — aserción incondicional con rejects.toThrow

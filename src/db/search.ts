@@ -4,7 +4,13 @@
  * fusión por Reciprocal Rank Fusion k=60.
  */
 import { type PrismaClient, Prisma } from '@prisma/client'
-import { SEMANTIC_DISCARD_THRESHOLD, RRF_K, ISSUE_NORMALIZED_SQL } from './constants.ts'
+import {
+  SEMANTIC_DISCARD_THRESHOLD,
+  RRF_K,
+  ISSUE_NORMALIZED_SQL,
+  headlineSnippet,
+  cleanSnippet,
+} from './constants.ts'
 import { embed } from './embeddings.ts'
 import { appFilterValues } from './apps.ts'
 
@@ -31,18 +37,22 @@ function extractSnippet(body: string, maxLen = 200): string {
   return body.length <= maxLen ? body : body.substring(0, maxLen) + '…'
 }
 
-/** Fusión RRF: dado dos listas ordenadas (lex y vec), combina por rank recíproco. */
+/**
+ * Fusión RRF: dado dos listas ordenadas (lex y vec), combina por rank recíproco.
+ * El `snippet` que trae la rama léxica (ts_headline sobre el término) se conserva;
+ * los resultados que solo aparecen en la rama semántica usan el inicio del cuerpo.
+ */
 function rrfFusion(
-  lexItems: { id: string; title: string; body_md: string; app: string; issue: string | null }[],
+  lexItems: { id: string; title: string; body_md: string; app: string; issue: string | null; snippet: string }[],
   vecItems: { id: string; title: string; body_md: string; app: string; issue: string | null }[],
   k: number,
-): { id: string; title: string; body_md: string; app: string; issue: string | null; score: number; origin: 'lexical' | 'semantic' | 'both' }[] {
-  type Entry = { score: number; title: string; body_md: string; app: string; issue: string | null; inLex: boolean; inVec: boolean }
+): { id: string; title: string; body_md: string; app: string; issue: string | null; snippet: string | null; score: number; origin: 'lexical' | 'semantic' | 'both' }[] {
+  type Entry = { score: number; title: string; body_md: string; app: string; issue: string | null; snippet: string | null; inLex: boolean; inVec: boolean }
   const map = new Map<string, Entry>()
 
   for (let i = 0; i < lexItems.length; i++) {
     const item = lexItems[i]!
-    map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, inLex: true, inVec: false })
+    map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, snippet: item.snippet, inLex: true, inVec: false })
   }
 
   for (let i = 0; i < vecItems.length; i++) {
@@ -51,7 +61,7 @@ function rrfFusion(
     if (existing) {
       map.set(item.id, { ...existing, score: existing.score + 1 / (k + i + 1), inVec: true })
     } else {
-      map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, inLex: false, inVec: true })
+      map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, snippet: null, inLex: false, inVec: true })
     }
   }
 
@@ -64,6 +74,7 @@ function rrfFusion(
       body_md: e.body_md,
       app: e.app,
       issue: e.issue,
+      snippet: e.snippet,
       origin: e.inLex && e.inVec ? 'both' : e.inLex ? 'lexical' : 'semantic',
     })
   }
@@ -97,10 +108,11 @@ export async function hybridSearch(
       : Prisma.empty
 
   const [ftsRows, vecRows] = await Promise.all([
-    // Búsqueda léxica
-    prisma.$queryRaw<{ id: string; title: string; body_md: string; app: string; issue: string | null }[]>(
+    // Búsqueda léxica — el snippet es el fragmento donde matcheó el término
+    prisma.$queryRaw<{ id: string; title: string; body_md: string; app: string; issue: string | null; snippet: string }[]>(
       Prisma.sql`
-        SELECT id, title, body_md, app, issue
+        SELECT id, title, body_md, app, issue,
+               ${headlineSnippet(query)} AS snippet
         FROM notes
         WHERE deleted_at IS NULL
           AND fts @@ websearch_to_tsquery('spanish', unaccent(${query}))
@@ -146,7 +158,7 @@ export async function hybridSearch(
   return merged.slice(0, limit).map((r) => ({
     id: r.id,
     title: r.title,
-    snippet: extractSnippet(r.body_md),
+    snippet: r.snippet === null ? extractSnippet(r.body_md) : cleanSnippet(r.snippet),
     score: r.score,
     origin: r.origin,
     app: r.app,

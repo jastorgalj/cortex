@@ -194,10 +194,16 @@ describe('MCP server — cortex tools', () => {
       name: 'cortex_history',
       arguments: { id: noteId },
     })
-    const histData = parseToolResult(histResult) as Array<{ rev: number; reason?: string }>
-    expect(histData.length).toBe(1)
-    expect(histData[0]!.rev).toBe(1)
-    expect(histData[0]!.reason).toBe('Agrego paso del gerente de crédito')
+    const histData = parseToolResult(histResult) as {
+      total: number
+      items: Array<{ rev: number; reason?: string; body_md?: string }>
+    }
+    expect(histData.total).toBe(1)
+    expect(histData.items.length).toBe(1)
+    expect(histData.items[0]!.rev).toBe(1)
+    expect(histData.items[0]!.reason).toBe('Agrego paso del gerente de crédito')
+    // Sin `rev` ni `include_body` el cuerpo no viaja
+    expect(histData.items[0]!.body_md).toBeUndefined()
 
     await client.close()
   })
@@ -302,10 +308,17 @@ describe('MCP server — cortex tools', () => {
       arguments: {},
     })
 
-    const data = parseToolResult(result) as Array<{ id: string }>
-    expect(Array.isArray(data)).toBe(true)
+    const data = parseToolResult(result) as {
+      total: number
+      items: Array<{ id: string; body_md?: string }>
+      next_offset: number | null
+    }
+    expect(Array.isArray(data.items)).toBe(true)
     // Debe haber al menos la nota del ciclo completo
-    expect(data.length).toBeGreaterThanOrEqual(1)
+    expect(data.items.length).toBeGreaterThanOrEqual(1)
+    expect(data.total).toBeGreaterThanOrEqual(data.items.length)
+    // El listado nunca trae el cuerpo
+    expect(data.items.every((n) => n.body_md === undefined)).toBe(true)
 
     await client.close()
   })
@@ -339,7 +352,7 @@ describe('MCP server — cortex tools', () => {
 
     const before = parseToolResult(
       await client.callTool({ name: 'cortex_list', arguments: {} }),
-    ) as Array<{ id: string }>
+    ) as { total: number }
 
     const result = await client.callTool({
       name: 'cortex_write',
@@ -364,8 +377,8 @@ describe('MCP server — cortex tools', () => {
     // No se creó ninguna nota
     const after = parseToolResult(
       await client.callTool({ name: 'cortex_list', arguments: {} }),
-    ) as Array<{ id: string }>
-    expect(after.length).toBe(before.length)
+    ) as { total: number }
+    expect(after.total).toBe(before.total)
 
     await client.close()
   })
@@ -436,10 +449,11 @@ describe('MCP server — cortex tools', () => {
     // El historial conserva la revisión 1
     const history = parseToolResult(
       await client.callTool({ name: 'cortex_history', arguments: { id: created.id } }),
-    ) as Array<{ rev: number; reason?: string }>
-    expect(history.length).toBe(1)
-    expect(history[0]!.rev).toBe(1)
-    expect(history[0]!.reason).toBe('reclasificada por el agente')
+    ) as { total: number; items: Array<{ rev: number; reason?: string }> }
+    expect(history.total).toBe(1)
+    expect(history.items.length).toBe(1)
+    expect(history.items[0]!.rev).toBe(1)
+    expect(history.items[0]!.reason).toBe('reclasificada por el agente')
 
     // base_rev obsoleto sigue detectando el conflicto después de la corrección
     const conflict = await client.callTool({
@@ -700,8 +714,8 @@ describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
       name: 'cortex_list',
       arguments: { issue: 'MCP-ISS-1' },
     })
-    const data = parseToolResult(result) as Array<{ id: string }>
-    const ids = data.map((r) => r.id)
+    const data = parseToolResult(result) as { items: Array<{ id: string }> }
+    const ids = data.items.map((r) => r.id)
 
     expect(ids).toContain(noteMcpIss1Id)
     // Si se quita issue de listNotes en mcp-server.ts:300, ISS-2 aparece — falla aquí
@@ -767,10 +781,158 @@ describe('MCP: force con reason (task 4.5 iv)', () => {
       name: 'cortex_list',
       arguments: { app: 'general' },
     })
-    const list = parseToolResult(listResult) as Array<{ id: string; force_reason?: string }>
-    const found = list.find((n) => n.id === created.id)
+    const list = parseToolResult(listResult) as { items: Array<{ id: string; force_reason?: string }> }
+    const found = list.items.find((n) => n.id === created.id)
     expect(found?.force_reason).toBe('es una nota de test, no un duplicado')
 
     await client.close()
   })
+})
+
+// ─── Tamaño de respuestas (issue #17) ────────────────────────────────────────
+
+describe('tamaño de respuestas: paginación, historial sin cuerpos y JSON compacto', () => {
+  test('cortex_list pagina con limit/offset y reporta total y next_offset', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    // Tres notas propias: el test no depende de lo que hayan dejado los anteriores
+    const uniq = Date.now()
+    for (let i = 0; i < 3; i++) {
+      await client.callTool({
+        name: 'cortex_write',
+        arguments: {
+          title: `Nota de paginación ${uniq}-${i}`,
+          body_md: `Cuerpo de la nota ${i} para verificar la paginación del listado (${uniq}).`,
+          app: 'general',
+          kind: 'sistema',
+          author: 'mcp-test',
+          force: true,
+          reason: 'datos de test: paginación',
+        },
+      })
+    }
+
+    type Page = { total: number; items: Array<{ id: string }>; next_offset: number | null }
+    const full = parseToolResult(await client.callTool({ name: 'cortex_list', arguments: {} })) as Page
+    expect(full.total).toBeGreaterThanOrEqual(3)
+
+    const first = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: { limit: 2 } }),
+    ) as Page
+    expect(first.items.length).toBe(2)
+    expect(first.total).toBe(full.total)
+    expect(first.next_offset).toBe(2)
+
+    const second = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: { limit: 2, offset: 2 } }),
+    ) as Page
+    const firstIds = first.items.map((n) => n.id)
+    expect(second.items.every((n) => !firstIds.includes(n.id))).toBe(true)
+
+    // Última página: no queda nada después, next_offset es null
+    const last = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: { offset: full.total - 1, limit: 2 } }),
+    ) as Page
+    expect(last.items.length).toBe(1)
+    expect(last.next_offset).toBeNull()
+
+    await client.close()
+  }, 120_000)
+
+  test('cortex_history sin args devuelve solo metadatos; con rev trae el cuerpo de esa revisión', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const uniq = Date.now()
+    const created = parseToolResult(
+      await client.callTool({
+        name: 'cortex_write',
+        arguments: {
+          title: `Historial sin cuerpos ${uniq}`,
+          body_md: `Cuerpo original de la nota ${uniq}: primera versión completa.`,
+          app: 'general',
+          kind: 'sistema',
+          author: 'mcp-test',
+          force: true,
+          reason: 'datos de test: historial',
+        },
+      }),
+    ) as { id: string }
+
+    for (const rev of [1, 2]) {
+      await client.callTool({
+        name: 'cortex_update',
+        arguments: {
+          id: created.id,
+          body_md: `Cuerpo original de la nota ${uniq}: versión ${rev + 1}.`,
+          author: 'mcp-test',
+          reason: `cambio ${rev + 1}`,
+          base_rev: rev,
+        },
+      })
+    }
+
+    type History = { total: number; items: Array<{ rev: number; title: string; body_md?: string }> }
+    const meta = parseToolResult(
+      await client.callTool({ name: 'cortex_history', arguments: { id: created.id } }),
+    ) as History
+    expect(meta.total).toBe(2)
+    expect(meta.items.map((r) => r.rev)).toEqual([1, 2])
+    // Sin include_body, ningún cuerpo viaja — solo los metadatos
+    expect(meta.items.every((r) => r.body_md === undefined)).toBe(true)
+    expect(meta.items.every((r) => typeof r.title === 'string' && r.title.length > 0)).toBe(true)
+
+    // `rev` es una lectura puntual: trae el cuerpo de esa revisión
+    const one = parseToolResult(
+      await client.callTool({ name: 'cortex_history', arguments: { id: created.id, rev: 1 } }),
+    ) as History
+    expect(one.total).toBe(1)
+    expect(one.items).toHaveLength(1)
+    expect(one.items[0]!.body_md).toContain('primera versión')
+
+    // `limit` acota a las más recientes
+    const limited = parseToolResult(
+      await client.callTool({ name: 'cortex_history', arguments: { id: created.id, limit: 1 } }),
+    ) as History
+    expect(limited.total).toBe(2)
+    expect(limited.items.map((r) => r.rev)).toEqual([2])
+
+    await client.close()
+  }, 120_000)
+
+  test('las respuestas MCP son JSON compacto (sin indentación)', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const uniq = Date.now()
+    const created = parseToolResult(
+      await client.callTool({
+        name: 'cortex_write',
+        arguments: {
+          title: `Compacto ${uniq}`,
+          body_md: `Nota ${uniq} con varias líneas\n\n- un punto\n- otro punto`,
+          app: 'general',
+          kind: 'sistema',
+          author: 'mcp-test',
+          force: true,
+          reason: 'datos de test: compacto',
+        },
+      }),
+    ) as { id: string }
+
+    const texts: string[] = [
+      textOf(await client.callTool({ name: 'cortex_list', arguments: { limit: 1 } })),
+      textOf(await client.callTool({ name: 'cortex_read', arguments: { id: created.id } })),
+      textOf(await client.callTool({ name: 'cortex_history', arguments: { id: created.id } })),
+      textOf(await client.callTool({ name: 'cortex_search', arguments: { q: String(uniq), limit: 1 } })),
+    ]
+
+    for (const text of texts) {
+      expect(text.includes('\n')).toBe(false)
+      expect(() => JSON.parse(text)).not.toThrow()
+    }
+
+    await client.close()
+  }, 120_000)
 })

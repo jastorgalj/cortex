@@ -515,10 +515,10 @@ describe('author por defecto en cortex_write y cortex_update', () => {
     const histResult = await clientH.callTool({ name: 'cortex_history', arguments: { id: noteId } })
     await clientH.close()
     expect((histResult as { isError?: boolean }).isError).not.toBe(true)
-    const revisions = parseResult(histResult) as Array<{ rev: number; author?: string }>
-    expect(Array.isArray(revisions)).toBe(true)
-    expect(revisions.length).toBeGreaterThan(0)
-    const rev1 = revisions.find((r) => r.rev === 1)
+    const revisions = parseResult(histResult) as { items: Array<{ rev: number; author?: string }> }
+    expect(Array.isArray(revisions.items)).toBe(true)
+    expect(revisions.items.length).toBeGreaterThan(0)
+    const rev1 = revisions.items.find((r) => r.rev === 1)
     expect(rev1).toBeDefined()
     expect(rev1?.author).toBe('autor-distinto')
   })
@@ -606,8 +606,8 @@ describe('author por defecto en cortex_write y cortex_update', () => {
     await connectClient(clientL)
     const listResult = await clientL.callTool({ name: 'cortex_list', arguments: {} })
     await clientL.close()
-    const notes = parseResult(listResult) as Array<{ id: string }>
-    expect(notes.some((n) => n.id === noteId)).toBe(true)
+    const notes = parseResult(listResult) as { items: Array<{ id: string }> }
+    expect(notes.items.some((n) => n.id === noteId)).toBe(true)
   })
 })
 

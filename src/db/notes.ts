@@ -6,6 +6,8 @@ import {
   DUPLICATE_DISTINCT_MARGIN,
   TITLE_SIMILARITY_THRESHOLD,
   ISSUE_NORMALIZED_SQL,
+  headlineSnippet,
+  cleanSnippet,
 } from './constants.ts'
 import { generateUlid } from './ulid.ts'
 import { embed } from './embeddings.ts'
@@ -130,6 +132,17 @@ export type ListFilter = {
   issue?: string
 }
 
+/** Paginación del listado: tope duro por respuesta (50 por defecto, 200 como máximo). */
+export const LIST_PAGE_DEFAULT = 50
+export const LIST_PAGE_MAX = 200
+
+export type ListPage = {
+  total: number
+  items: NoteDto[]
+  /** `null` cuando ya no quedan notas después de esta página. */
+  next_offset: number | null
+}
+
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 
 type NoteRow = {
@@ -164,10 +177,6 @@ function toNoteDto(note: NoteRow): NoteDto {
     updated_at: note.updated_at,
     deleted_at: note.deleted_at,
   }
-}
-
-function snippet(body: string, maxLen = 200): string {
-  return body.length <= maxLen ? body : body.substring(0, maxLen) + '…'
 }
 
 function validateCreate(input: CreateInput): void {
@@ -519,10 +528,14 @@ export async function updateNote(
   })
 }
 
-export async function listNotes(
+/**
+ * Where del listado en un solo lugar: la lista completa y la página paginada aplican
+ * el mismo filtro (una sola fuente de verdad).
+ */
+async function buildListWhere(
   prisma: PrismaClient,
-  filter: ListFilter = {},
-): Promise<NoteDto[]> {
+  filter: ListFilter,
+): Promise<Prisma.NoteWhereInput> {
   // Filtro SQL de issue: pre-filtra ids para usar el índice notes_issue_idx
   let issueIds: string[] | null = null
   const issueTrimmed = filter.issue?.trim()
@@ -533,31 +546,57 @@ export async function listNotes(
     issueIds = rows.map((r) => r.id)
   }
 
+  return {
+    deleted_at: null,
+    ...(filter.app
+      ? {
+          app: {
+            in: appFilterValues(filter.app, filter.include_general !== false),
+          },
+        }
+      : {}),
+    ...(filter.kind ? { kind: filter.kind } : {}),
+    ...(filter.author ? { author: filter.author } : {}),
+    ...(issueIds !== null ? { id: { in: issueIds } } : {}),
+    // Tags en SQL (`jsonb @>`): misma semántica AND que el filtro en memoria anterior
+    ...(filter.tags?.length ? { tags: { array_contains: filter.tags } } : {}),
+  }
+}
+
+export async function listNotes(
+  prisma: PrismaClient,
+  filter: ListFilter = {},
+): Promise<NoteDto[]> {
   const notes = await prisma.note.findMany({
-    where: {
-      deleted_at: null,
-      ...(filter.app
-        ? {
-            app: {
-              in: appFilterValues(filter.app, filter.include_general !== false),
-            },
-          }
-        : {}),
-      ...(filter.kind ? { kind: filter.kind } : {}),
-      ...(filter.author ? { author: filter.author } : {}),
-      ...(issueIds !== null ? { id: { in: issueIds } } : {}),
-    },
+    where: await buildListWhere(prisma, filter),
     orderBy: { updated_at: 'desc' },
   })
+  return notes.map((n) => toNoteDto(n as unknown as NoteRow))
+}
 
-  let result = notes.map((n) => toNoteDto(n as unknown as NoteRow))
-
-  // Filtro de tags en memoria (corpus pequeño — megabytes)
-  if (filter.tags?.length) {
-    result = result.filter((n) => filter.tags!.every((tag) => n.tags.includes(tag)))
-  }
-
-  return result
+/**
+ * Listado paginado: la respuesta MCP no crece con el corpus. `total` cuenta todo lo
+ * que cumple el filtro (no solo la página) y `next_offset` es `null` en la última página.
+ */
+export async function listNotesPage(
+  prisma: PrismaClient,
+  filter: ListFilter = {},
+  limit: number = LIST_PAGE_DEFAULT,
+  offset = 0,
+): Promise<ListPage> {
+  const where = await buildListWhere(prisma, filter)
+  const [total, notes] = await Promise.all([
+    prisma.note.count({ where }),
+    prisma.note.findMany({
+      where,
+      orderBy: { updated_at: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+  ])
+  const items = notes.map((n) => toNoteDto(n as unknown as NoteRow))
+  const next = offset + items.length
+  return { total, items, next_offset: next < total ? next : null }
 }
 
 /**
@@ -626,24 +665,52 @@ export async function softDeleteNote(
   })
 }
 
+/** Vista de una revisión: `body_md` solo viene cuando se pide explícitamente. */
+export type NoteRevisionView = Omit<NoteRevisionDto, 'body_md'> & { body_md?: string }
+
+export type HistoryPage = { total: number; items: NoteRevisionView[] }
+
+export type HistoryOptions = {
+  /** Devuelve solo esa revisión (trae su cuerpo: es una lectura puntual). */
+  rev?: number
+  /** Incluye `body_md` en cada revisión (default true: historial completo). */
+  include_body?: boolean
+  /** Máximo de revisiones: las más recientes (default sin tope). */
+  limit?: number
+}
+
 export async function getNoteHistory(
   prisma: PrismaClient,
   noteId: string,
-): Promise<NoteRevisionDto[]> {
-  const revisions = await prisma.noteRevision.findMany({
-    where: { note_id: noteId },
-    orderBy: { rev: 'asc' },
+  opts: HistoryOptions = {},
+): Promise<HistoryPage> {
+  const { rev, include_body = true, limit } = opts
+  const where = { note_id: noteId, ...(rev !== undefined ? { rev } : {}) }
+
+  // Sin `limit` se devuelve todo en orden ascendente; con `limit`, las N más recientes
+  // (se piden descendentes para que el tope corte el pasado, no el presente).
+  const [total, revisions] = await Promise.all([
+    prisma.noteRevision.count({ where }),
+    limit === undefined
+      ? prisma.noteRevision.findMany({ where, orderBy: { rev: 'asc' } })
+      : prisma.noteRevision.findMany({ where, orderBy: { rev: 'desc' }, take: limit }),
+  ])
+  const ordered = limit === undefined ? revisions : revisions.reverse()
+
+  const items = ordered.map((r) => {
+    const meta = {
+      note_id: r.note_id,
+      rev: r.rev,
+      title: r.title,
+      tags: (r.tags as string[] | null) ?? [],
+      author: r.author,
+      reason: r.reason,
+      created_at: r.created_at,
+    }
+    return include_body ? { ...meta, body_md: r.body_md } : meta
   })
-  return revisions.map((r) => ({
-    note_id: r.note_id,
-    rev: r.rev,
-    title: r.title,
-    body_md: r.body_md,
-    tags: (r.tags as string[] | null) ?? [],
-    author: r.author,
-    reason: r.reason,
-    created_at: r.created_at,
-  }))
+
+  return { total, items }
 }
 
 /** Búsqueda léxica (task 1.4) — full-text Postgres español, insensible a tildes. */
@@ -657,9 +724,10 @@ export async function lexicalSearch(
     : Prisma.empty
   const kindCond = filter.kind ? Prisma.sql`AND kind = ${filter.kind}` : Prisma.empty
 
-  const rows = await prisma.$queryRaw<{ id: string; title: string; body_md: string; score: number }[]>(
+  const rows = await prisma.$queryRaw<{ id: string; title: string; snippet: string; score: number }[]>(
     Prisma.sql`
-      SELECT id, title, body_md,
+      SELECT id, title,
+             ${headlineSnippet(query)} AS snippet,
              ts_rank(fts, websearch_to_tsquery('spanish', unaccent(${query}))) AS score
       FROM notes
       WHERE deleted_at IS NULL
@@ -674,7 +742,7 @@ export async function lexicalSearch(
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
-    snippet: snippet(r.body_md),
+    snippet: cleanSnippet(r.snippet),
     score: Number(r.score),
   }))
 }

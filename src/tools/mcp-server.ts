@@ -12,7 +12,9 @@ import {
   createNote,
   readNote,
   updateNote,
-  listNotes,
+  listNotesPage,
+  LIST_PAGE_DEFAULT,
+  LIST_PAGE_MAX,
   countNotesByApp,
   getNoteHistory,
   softDeleteNote,
@@ -63,10 +65,11 @@ const APP_DESCRIPTION = (() => {
  * Serializa la nota agregando `warnings` solo cuando hay algo que advertir: una
  * nota bien formada devuelve exactamente el JSON de siempre (sin campo extra).
  * No bloqueante — la nota ya se creó/actualizó.
+ * JSON compacto: la indentación no aporta información al agente y multiplica tokens.
  */
 function withWarnings(note: object, warnings: string[]): string {
-  if (warnings.length === 0) return JSON.stringify(note, null, 2)
-  return JSON.stringify({ ...note, warnings }, null, 2)
+  if (warnings.length === 0) return JSON.stringify(note)
+  return JSON.stringify({ ...note, warnings })
 }
 
 function registerTools(server: McpServer, prisma: PrismaClient): void {
@@ -102,7 +105,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           { app, include_general, kind, issue, tags },
           limit ?? 10,
         )
-        return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] }
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_search: ${msg}` }], isError: true }
@@ -126,7 +129,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       }
       try {
         const note = await readNote(prisma, id)
-        return { content: [{ type: 'text', text: JSON.stringify(note, null, 2) }] }
+        return { content: [{ type: 'text', text: JSON.stringify(note) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {
@@ -205,18 +208,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(
-                  {
-                    status: 'similar_exists',
-                    message:
-                      `Se encontraron notas muy similares (umbral coseno: ${umbral}, o mismo issue con título casi igual). ` +
-                      'Para fusionar el contenido nuevo con una nota existente, usa cortex_update sobre el id candidato. ' +
-                      'Para crear la nota igualmente (aceptando posible duplicado), reintenta con force: true y reason explicando por qué no es un duplicado.',
-                    candidates: result.candidates,
-                  },
-                  null,
-                  2,
-                ),
+                text: JSON.stringify({
+                  status: 'similar_exists',
+                  message:
+                    `Se encontraron notas muy similares (umbral coseno: ${umbral}, o mismo issue con título casi igual). ` +
+                    'Para fusionar el contenido nuevo con una nota existente, usa cortex_update sobre el id candidato. ' +
+                    'Para crear la nota igualmente (aceptando posible duplicado), reintenta con force: true y reason explicando por qué no es un duplicado.',
+                  candidates: result.candidates,
+                }),
               },
             ],
           }
@@ -357,7 +356,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_list ────────────────────────────────────────────────────────────
   server.tool(
     'cortex_list',
-    'Lista notas no borradas con filtros opcionales. Ordenadas por updated_at descendente. No incluye el body_md para mantener la respuesta compacta. Al filtrar por app incluye `general`.',
+    'Lista notas no borradas con filtros opcionales. Ordenadas por updated_at descendente. Paginada: devuelve { total, items, next_offset } con 50 notas por página (máx 200); pide la siguiente con offset=next_offset. No incluye el body_md para mantener la respuesta compacta. Al filtrar por app incluye `general`.',
     {
       app: z
         .string()
@@ -374,13 +373,35 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       author: z.string().optional().describe('Filtro por autor'),
       issue: z.string().optional().describe('Filtro por issue (sin importar mayúsculas ni espacios)'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(LIST_PAGE_MAX)
+        .optional()
+        .describe(`Máximo de notas a devolver (default ${LIST_PAGE_DEFAULT}, máx ${LIST_PAGE_MAX})`),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe('Notas a saltar; usa el next_offset de la respuesta anterior para seguir'),
     },
-    async ({ app, include_general, kind, tags, author, issue }) => {
+    async ({ app, include_general, kind, tags, author, issue, limit, offset }) => {
       try {
-        const notes = await listNotes(prisma, { app, include_general, kind, tags, author, issue })
+        const page = await listNotesPage(
+          prisma,
+          { app, include_general, kind, tags, author, issue },
+          limit ?? LIST_PAGE_DEFAULT,
+          offset ?? 0,
+        )
         // Excluye body_md para compactar la respuesta en listados
-        const compact = notes.map(({ body_md: _, ...rest }) => rest)
-        return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] }
+        const items = page.items.map(({ body_md: _, ...rest }) => rest)
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify({ total: page.total, items, next_offset: page.next_offset }) },
+          ],
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_list: ${msg}` }], isError: true }
@@ -401,18 +422,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                {
-                  apps,
-                  vocabulary: {
-                    canonicas: [...new Set([...config.apps, GENERAL_APP])],
-                    modo: config.mode,
-                    aliases: config.aliases,
-                  },
+              text: JSON.stringify({
+                apps,
+                vocabulary: {
+                  canonicas: [...new Set([...config.apps, GENERAL_APP])],
+                  modo: config.mode,
+                  aliases: config.aliases,
                 },
-                null,
-                2,
-              ),
+              }),
             },
           ],
         }
@@ -426,11 +443,28 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_history ─────────────────────────────────────────────────────────
   server.tool(
     'cortex_history',
-    'Obtiene el historial completo de revisiones de una nota (todas las versiones anteriores a la vigente, ordenadas por rev asc).',
+    'Historial de revisiones de una nota. Por defecto devuelve solo metadatos (rev, title, tags, author, reason, created_at) de las 10 revisiones más recientes; usa include_body: true para los cuerpos de todas, o rev: N para el cuerpo de una revisión puntual.',
     {
       id: z.string().describe('Id de la nota (ULID)'),
+      rev: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe('Devuelve solo esa revisión, con su body_md'),
+      include_body: z
+        .boolean()
+        .optional()
+        .describe('Incluye el body_md de cada revisión (default false: los cuerpos inflan la respuesta)'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe('Máximo de revisiones a devolver, las más recientes (default 10)'),
     },
-    async ({ id }) => {
+    async ({ id, rev, include_body, limit }) => {
       if (!id?.trim()) {
         return {
           content: [{ type: 'text', text: "Error en cortex_history: el parámetro 'id' es requerido" }],
@@ -438,8 +472,13 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         }
       }
       try {
-        const history = await getNoteHistory(prisma, id)
-        return { content: [{ type: 'text', text: JSON.stringify(history, null, 2) }] }
+        // `rev` es una lectura puntual: siempre trae el cuerpo de esa revisión
+        const page = await getNoteHistory(prisma, id, {
+          rev,
+          include_body: include_body === true || rev !== undefined,
+          limit: rev !== undefined ? undefined : (limit ?? 10),
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(page) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_history: ${msg}` }], isError: true }
@@ -493,11 +532,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                { id: result.id, deleted_at: result.deleted_at, rev: result.rev },
-                null,
-                2,
-              ),
+              text: JSON.stringify({ id: result.id, deleted_at: result.deleted_at, rev: result.rev }),
             },
           ],
         }

@@ -17,6 +17,26 @@ export const DUPLICATE_DISTINCT_MARGIN = 0.1
 export const TITLE_SIMILARITY_THRESHOLD = 0.6
 
 /**
+ * Ventana del snippet de búsqueda: `ts_headline` devuelve el fragmento donde matcheó el
+ * término, no los primeros caracteres del cuerpo (que pueden no contenerlo).
+ * El cuerpo se pasa por `unaccent` para que el resaltado use la misma normalización
+ * que el índice FTS: sin eso, buscar «evaluacion» no resalta «evaluación».
+ */
+const HEADLINE_OPTIONS = 'MaxWords=35,MinWords=15'
+
+export function headlineSnippet(query: string): Prisma.Sql {
+  return Prisma.sql`ts_headline('spanish', unaccent(body_md), websearch_to_tsquery('spanish', unaccent(${query})), ${HEADLINE_OPTIONS})`
+}
+
+/**
+ * Quita los marcadores `<b>` que `ts_headline` intercala en el fragmento: al agente le
+ * sirve el contexto, no el resaltado, y los marcadores cortan el término en pedazos.
+ */
+export function cleanSnippet(text: string): string {
+  return text.replace(/<\/?b>/g, '')
+}
+
+/**
  * Lee el umbral de duplicados del entorno.
  * - Ausente o cadena vacía → 0.75 (DEFAULT_DUPLICATE_THRESHOLD).
  * - No finito, ≤ 0 o > 1 → lanza Error con CORTEX_DUPLICATE_THRESHOLD, el valor y pista de formato.

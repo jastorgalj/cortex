@@ -416,3 +416,29 @@ describe('hybridSearch — resultado expone issue (5.3)', () => {
     expect(hit!.issue).toBeNull()
   }, 60_000)
 })
+
+// ─── Snippet contextual (issue #17) ──────────────────────────────────────────
+
+describe('snippet contextual', () => {
+  test('contiene el término buscado aunque aparezca después de los primeros 200 caracteres', async () => {
+    const relleno = 'Relleno neutro sin el identificador buscado. '.repeat(10) // > 200 caracteres
+    const uniq = `SNIP-${Date.now()}`
+    const r = await createNote(prisma, {
+      title: `Snippet contextual ${uniq}`,
+      body_md: `${relleno}\n\nEl identificador ${uniq} aparece recién al final del cuerpo de esta nota.`,
+      app: 'general',
+      kind: 'sistema',
+      author: 'tester',
+      force: true,
+      reason: 'datos de test: snippet',
+    })
+    if (r.status !== 'created') throw new Error('No se creó')
+
+    const results = await hybridSearch(prisma, uniq, {}, 10)
+    const hit = results.find((res) => res.id === r.note.id)
+    expect(hit).toBeDefined()
+    expect(hit!.snippet.toLowerCase()).toContain(uniq.toLowerCase())
+    // El snippet es una ventana, no el cuerpo entero
+    expect(hit!.snippet.length).toBeLessThan(500)
+  }, 60_000)
+})
