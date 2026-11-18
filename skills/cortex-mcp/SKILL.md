@@ -30,6 +30,8 @@ claude mcp add --transport http cortex http://localhost:3091/mcp
 
 ```
 Empiezo una tarea en <app>   → cortex_search (q + app) y cortex_list con kind=regla
+                              (ambos incluyen las notas de `general`, que son las transversales)
+No sé qué apps existen       → cortex_apps (apps en uso con su conteo + vocabulario)
 Retomo un ticket              → cortex_list o cortex_search con issue=<ID>
 Encontré algo relevante      → cortex_read (la nota completa, no el snippet)
 Aprendí algo que el equipo debe saber:
@@ -44,15 +46,21 @@ Cortex evita.
 ## La convención vigente
 
 Las llaves de sistema, los cinco tipos con su esqueleto y las reglas de título, tags y granularidad viven
-en Cortex, no en esta skill: `cortex_list(app: "general", kind: "regla")`. Leela antes de escribir la
-primera nota de un sistema; si algo no encaja en los cinco tipos, se propone por issue, no se inventa.
+en Cortex, no en esta skill: `cortex_list(app: "general", kind: "regla")`. Las notas de `general` son las
+transversales: filtrar por cualquier `app` las incluye (salvo `include_general: false`), así que «no hay
+reglas para mi app» casi siempre significa «están en `general`». Leela antes de escribir la primera nota
+de un sistema; si algo no encaja en los cinco tipos, se propone por issue, no se inventa.
+
+Si dudás del valor de `app`, no lo inventes: `cortex_apps` lista las apps vigentes con su conteo y el
+vocabulario configurado. Un valor fuera del vocabulario queda guardado con un `warnings` (o se rechaza en
+modo `strict`), y un alias configurado se persiste como su valor canónico.
 
 ## La nota
 
 | Campo | Qué es |
 |---|---|
 | `title`, `body_md` | Título corto y contenido en Markdown |
-| `app` | Llave del sistema: el producto (`console`, `omnisales-pos`, `licitapro`, `general`…) |
+| `app` | Llave del sistema: el producto (`console`, `omnisales-pos`, `licitapro`, `general`…). Se guarda en minúsculas; si el servidor declara vocabulario (`CORTEX_APPS`), un valor fuera de él vuelve como `warnings` |
 | `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` — cinco, sin `otro` |
 | `tags` | Con prefijo: `area:`, `repo:`, `stack:`, `env:` (los valores, en la nota de convención); `origen:` lo reserva el importador |
 | `author` | Quién escribe. Obligatorio en `cortex_delete`; opcional en `cortex_write`/`cortex_update` (cadena: argumento > header `x-cortex-author` > nombre del cliente MCP > `agente`). |

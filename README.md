@@ -37,7 +37,7 @@ para todo el equipo, así que no hay `pull`, ni ramas de conocimiento, ni confli
 | Campo | Qué es |
 |---|---|
 | `title`, `body_md` | Título y contenido en Markdown |
-| `app` | A qué sistema pertenece: `cartera`, `huella`, `api-scoring`, `general`, nombre del repo… |
+| `app` | A qué sistema pertenece: `cartera`, `huella`, `api-scoring`, `general`, nombre del repo… Se normaliza a minúsculas y el filtro incluye siempre `general`, que es la app transversal |
 | `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` |
 | `tags` | Libres. Los que empiezan con `origen:` los reserva el importador |
 | `author` | Quién la escribe. Obligatorio en `cortex_delete`; opcional en `cortex_write`/`cortex_update` (cadena de resolución: argumento > header `x-cortex-author` > nombre del cliente MCP > `agente`; un author inferido no es un author declarado). |
@@ -60,13 +60,21 @@ Tres reglas que hacen que la memoria no se degrade:
 
 | Tool | Para qué |
 |---|---|
-| `cortex_search` | Búsqueda híbrida (léxica + semántica). Filtros opcionales por `app`, `kind`, `issue` y `tags` (AND) |
+| `cortex_search` | Búsqueda híbrida (léxica + semántica). Filtros opcionales por `app` (incluye `general`, salvo `include_general: false`), `kind`, `issue` y `tags` (AND) |
 | `cortex_read` | Leer una nota completa por id |
 | `cortex_write` | Crear una nota. Detecta duplicados (umbral 0.75 configurable); `force: true` + `reason` para crear igual |
 | `cortex_update` | Actualizar una nota; puede corregir o quitar `issue` con `reason` y la revisión que se leyó, opcionales |
-| `cortex_list` | Listar notas con filtros (`app`, `kind`, tags, autor, `issue`) |
+| `cortex_list` | Listar notas con filtros (`app` con `general` incluido, `kind`, tags, autor, `issue`) |
+| `cortex_apps` | Ver qué apps existen hoy, cada una con su conteo de notas, más el vocabulario configurado |
 | `cortex_history` | Historial de revisiones de una nota |
 | `cortex_delete` | Borrar una nota (lógico). Exige `author` y `reason`; queda en el historial |
+
+**Vocabulario de `app`.** `app` es texto libre normalizado a minúsculas. Para que el equipo no fragmente
+el corpus, el servidor acepta un vocabulario canónico por entorno: `CORTEX_APPS=backend,console,general`,
+`CORTEX_APP_ALIASES={"back":"backend"}` (un alias escribe el canónico) y `CORTEX_APP_MODE=warn|strict`
+(`warn`, el default, acepta un valor desconocido y devuelve `warnings`; `strict` lo rechaza listando los
+válidos). `general` es la app transversal: filtrar por cualquier app incluye sus notas salvo
+`include_general: false`. `cortex_apps` (o `GET /api/apps`) muestra qué apps existen hoy con su conteo.
 
 **Alias de argumentos.** Las tools aceptan claves equivalentes para facilitar la integración con
 agentes que usan nombres distintos: `query` o `text` como alias de `q` en `cortex_search`; `body`,
@@ -128,7 +136,7 @@ Silicon) funciona, pero corre emulada: sirve para probar, no para producción.
 
 ```bash
 hermes mcp add cortex --url http://localhost:3091/mcp
-hermes mcp test cortex        # debe listar las 7 tools
+hermes mcp test cortex        # debe listar las 8 tools
 ```
 
 Las tools aparecen como `mcp__cortex__cortex_search`, `mcp__cortex__cortex_write`, etc. Si cambian los
@@ -171,6 +179,8 @@ Además de MCP, el servidor expone una API REST de solo lectura para personas y 
 
 ```bash
 curl "http://localhost:3091/api/search?q=tasa+especial&app=cartera&limit=5"
+curl "http://localhost:3091/api/search?q=tasa+especial&app=cartera&include_general=false"
+curl "http://localhost:3091/api/apps"
 curl "http://localhost:3091/api/notes/<id>"
 curl http://localhost:3091/health
 ```

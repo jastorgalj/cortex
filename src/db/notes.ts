@@ -9,6 +9,7 @@ import {
 } from './constants.ts'
 import { generateUlid } from './ulid.ts'
 import { embed } from './embeddings.ts'
+import { resolveApp, appFilterValues } from './apps.ts'
 
 // ─── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export type LexicalResult = {
 }
 
 export type WriteResult =
-  | { status: 'created'; note: NoteDto }
+  | { status: 'created'; note: NoteDto; warnings: string[] }
   | { status: 'similar_exists'; candidates: DuplicateCandidate[] }
 
 // ─── Errores ──────────────────────────────────────────────────────────────────
@@ -120,6 +121,8 @@ export type UpdateInput = {
 
 export type ListFilter = {
   app?: string
+  /** Incluir la app transversal `general` al filtrar por `app` (default true). */
+  include_general?: boolean
   kind?: string
   tags?: string[]
   author?: string
@@ -322,6 +325,11 @@ export async function createNote(
 ): Promise<WriteResult> {
   validateCreate(input)
 
+  // `app` es texto libre: se normaliza, se resuelve alias y se valida el vocabulario
+  // (si hay `CORTEX_APPS`). El valor persistido es siempre el canónico.
+  const resolvedApp = resolveApp(input.app)
+  if (!resolvedApp.ok) throw new ValidationError(resolvedApp.message, 'app')
+
   const id = generateUlid()
   const tags = input.tags ?? []
   const vector = await embed(input.title + ' ' + input.body_md)
@@ -348,7 +356,7 @@ export async function createNote(
         id,
         title: input.title,
         body_md: input.body_md,
-        app: input.app,
+        app: resolvedApp.app,
         kind: input.kind,
         tags,
         author: input.author,
@@ -363,7 +371,11 @@ export async function createNote(
   })
 
   const created = await prisma.note.findUniqueOrThrow({ where: { id } })
-  return { status: 'created', note: toNoteDto(created as unknown as NoteRow) }
+  return {
+    status: 'created',
+    note: toNoteDto(created as unknown as NoteRow),
+    warnings: resolvedApp.warnings,
+  }
 }
 
 export async function readNote(
@@ -381,7 +393,7 @@ export async function updateNote(
   prisma: PrismaClient,
   id: string,
   input: UpdateInput,
-): Promise<NoteDto> {
+): Promise<NoteDto & { warnings?: string[] }> {
   if (!input.author || input.author.trim() === '') {
     throw new ValidationError('El campo author es requerido para actualizar', 'author')
   }
@@ -395,6 +407,14 @@ export async function updateNote(
   }
   if (input.app !== undefined && input.app.trim() === '') {
     throw new ValidationError('El campo app no puede estar vacío', 'app')
+  }
+  // `app` de la corrección de clasificación: mismo camino que createNote (alias +
+  // vocabulario). El valor escrito es el canónico, no el que llegó.
+  let resolvedApp: { app: string; warnings: string[] } | undefined
+  if (input.app !== undefined) {
+    const resolved = resolveApp(input.app)
+    if (!resolved.ok) throw new ValidationError(resolved.message, 'app')
+    resolvedApp = { app: resolved.app, warnings: resolved.warnings }
   }
   if (input.issue !== undefined && input.issue !== null && input.issue.trim() === '') {
     throw new ValidationError('El campo issue no puede estar vacío — usa null para quitarlo', 'issue')
@@ -464,7 +484,7 @@ export async function updateNote(
         title: newTitle,
         body_md: newBodyMd,
         tags: newTags,
-        ...(input.app !== undefined ? { app: input.app } : {}),
+        ...(resolvedApp !== undefined ? { app: resolvedApp.app } : {}),
         ...(input.kind !== undefined ? { kind: input.kind } : {}),
         ...(input.issue !== undefined ? { issue: input.issue === null ? null : input.issue.trim() } : {}),
         author: input.author,
@@ -481,7 +501,10 @@ export async function updateNote(
     }
 
     const updated = await tx.note.findUniqueOrThrow({ where: { id } })
-    return toNoteDto(updated as unknown as NoteRow)
+    const dto = toNoteDto(updated as unknown as NoteRow)
+    return resolvedApp && resolvedApp.warnings.length > 0
+      ? { ...dto, warnings: resolvedApp.warnings }
+      : dto
   })
 }
 
@@ -502,7 +525,13 @@ export async function listNotes(
   const notes = await prisma.note.findMany({
     where: {
       deleted_at: null,
-      ...(filter.app ? { app: filter.app } : {}),
+      ...(filter.app
+        ? {
+            app: {
+              in: appFilterValues(filter.app, filter.include_general !== false),
+            },
+          }
+        : {}),
       ...(filter.kind ? { kind: filter.kind } : {}),
       ...(filter.author ? { author: filter.author } : {}),
       ...(issueIds !== null ? { id: { in: issueIds } } : {}),
@@ -518,6 +547,23 @@ export async function listNotes(
   }
 
   return result
+}
+
+/**
+ * Apps vigentes con su cantidad de notas (no borradas), ordenadas por nombre.
+ * Es el descubrimiento del vocabulario real: qué valores existen hoy, más allá de la
+ * lista canónica configurada.
+ */
+export async function countNotesByApp(
+  prisma: PrismaClient,
+): Promise<{ app: string; count: number }[]> {
+  const rows = await prisma.note.groupBy({
+    by: ['app'],
+    where: { deleted_at: null },
+    _count: { _all: true },
+    orderBy: { app: 'asc' },
+  })
+  return rows.map((r) => ({ app: r.app, count: r._count._all }))
 }
 
 export async function softDeleteNote(
@@ -593,9 +639,11 @@ export async function getNoteHistory(
 export async function lexicalSearch(
   prisma: PrismaClient,
   query: string,
-  filter: { app?: string; kind?: string } = {},
+  filter: { app?: string; include_general?: boolean; kind?: string } = {},
 ): Promise<LexicalResult[]> {
-  const appCond = filter.app ? Prisma.sql`AND app = ${filter.app}` : Prisma.empty
+  const appCond = filter.app
+    ? Prisma.sql`AND app IN (${Prisma.join(appFilterValues(filter.app, filter.include_general !== false))})`
+    : Prisma.empty
   const kindCond = filter.kind ? Prisma.sql`AND kind = ${filter.kind}` : Prisma.empty
 
   const rows = await prisma.$queryRaw<{ id: string; title: string; body_md: string; score: number }[]>(

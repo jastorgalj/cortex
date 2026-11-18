@@ -6,6 +6,7 @@
 import { type PrismaClient, Prisma } from '@prisma/client'
 import { SEMANTIC_DISCARD_THRESHOLD, RRF_K, ISSUE_NORMALIZED_SQL } from './constants.ts'
 import { embed } from './embeddings.ts'
+import { appFilterValues } from './apps.ts'
 
 export type SearchResult = {
   id: string
@@ -13,11 +14,14 @@ export type SearchResult = {
   snippet: string
   score: number
   origin: 'lexical' | 'semantic' | 'both'
+  app: string
   issue: string | null
 }
 
 export type SearchFilter = {
   app?: string
+  /** Incluir la app transversal `general` al filtrar por `app` (default true). */
+  include_general?: boolean
   kind?: string
   issue?: string
   tags?: string[]
@@ -29,16 +33,16 @@ function extractSnippet(body: string, maxLen = 200): string {
 
 /** Fusión RRF: dado dos listas ordenadas (lex y vec), combina por rank recíproco. */
 function rrfFusion(
-  lexItems: { id: string; title: string; body_md: string; issue: string | null }[],
-  vecItems: { id: string; title: string; body_md: string; issue: string | null }[],
+  lexItems: { id: string; title: string; body_md: string; app: string; issue: string | null }[],
+  vecItems: { id: string; title: string; body_md: string; app: string; issue: string | null }[],
   k: number,
-): { id: string; title: string; body_md: string; issue: string | null; score: number; origin: 'lexical' | 'semantic' | 'both' }[] {
-  type Entry = { score: number; title: string; body_md: string; issue: string | null; inLex: boolean; inVec: boolean }
+): { id: string; title: string; body_md: string; app: string; issue: string | null; score: number; origin: 'lexical' | 'semantic' | 'both' }[] {
+  type Entry = { score: number; title: string; body_md: string; app: string; issue: string | null; inLex: boolean; inVec: boolean }
   const map = new Map<string, Entry>()
 
   for (let i = 0; i < lexItems.length; i++) {
     const item = lexItems[i]!
-    map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, issue: item.issue, inLex: true, inVec: false })
+    map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, inLex: true, inVec: false })
   }
 
   for (let i = 0; i < vecItems.length; i++) {
@@ -47,7 +51,7 @@ function rrfFusion(
     if (existing) {
       map.set(item.id, { ...existing, score: existing.score + 1 / (k + i + 1), inVec: true })
     } else {
-      map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, issue: item.issue, inLex: false, inVec: true })
+      map.set(item.id, { score: 1 / (k + i + 1), title: item.title, body_md: item.body_md, app: item.app, issue: item.issue, inLex: false, inVec: true })
     }
   }
 
@@ -58,6 +62,7 @@ function rrfFusion(
       score: e.score,
       title: e.title,
       body_md: e.body_md,
+      app: e.app,
       issue: e.issue,
       origin: e.inLex && e.inVec ? 'both' : e.inLex ? 'lexical' : 'semantic',
     })
@@ -76,7 +81,9 @@ export async function hybridSearch(
   filter: SearchFilter = {},
   limit = 10,
 ): Promise<SearchResult[]> {
-  const appCond = filter.app ? Prisma.sql`AND app = ${filter.app}` : Prisma.empty
+  const appCond = filter.app
+    ? Prisma.sql`AND app IN (${Prisma.join(appFilterValues(filter.app, filter.include_general !== false))})`
+    : Prisma.empty
   const kindCond = filter.kind ? Prisma.sql`AND kind = ${filter.kind}` : Prisma.empty
 
   const issueTrimmed = filter.issue?.trim()
@@ -91,9 +98,9 @@ export async function hybridSearch(
 
   const [ftsRows, vecRows] = await Promise.all([
     // Búsqueda léxica
-    prisma.$queryRaw<{ id: string; title: string; body_md: string; issue: string | null }[]>(
+    prisma.$queryRaw<{ id: string; title: string; body_md: string; app: string; issue: string | null }[]>(
       Prisma.sql`
-        SELECT id, title, body_md, issue
+        SELECT id, title, body_md, app, issue
         FROM notes
         WHERE deleted_at IS NULL
           AND fts @@ websearch_to_tsquery('spanish', unaccent(${query}))
@@ -110,9 +117,9 @@ export async function hybridSearch(
     (async () => {
       const vector = await embed(query)
       const vecStr = `[${vector.join(',')}]`
-      return prisma.$queryRaw<{ id: string; title: string; body_md: string; issue: string | null; score: number }[]>(
+      return prisma.$queryRaw<{ id: string; title: string; body_md: string; app: string; issue: string | null; score: number }[]>(
         Prisma.sql`
-          SELECT id, title, body_md, issue,
+          SELECT id, title, body_md, app, issue,
                  1 - (embedding <=> ${vecStr}::vector(768)) AS score
           FROM notes
           WHERE deleted_at IS NULL
@@ -131,7 +138,7 @@ export async function hybridSearch(
 
   // Descarte semántico ya aplicado en la query (WHERE score >= threshold)
   // Para claridad tipamos el filtro aquí también
-  const vecFiltered = (vecRows as { id: string; title: string; body_md: string; issue: string | null; score: number }[])
+  const vecFiltered = (vecRows as { id: string; title: string; body_md: string; app: string; issue: string | null; score: number }[])
     .filter((r) => Number(r.score) >= SEMANTIC_DISCARD_THRESHOLD)
 
   const merged = rrfFusion(ftsRows, vecFiltered, RRF_K)
@@ -142,6 +149,7 @@ export async function hybridSearch(
     snippet: extractSnippet(r.body_md),
     score: r.score,
     origin: r.origin,
+    app: r.app,
     issue: r.issue,
   }))
 }

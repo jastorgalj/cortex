@@ -25,6 +25,9 @@ services:
       PORT: 3091
       NODE_ENV: production
       CORTEX_DUPLICATE_THRESHOLD: ${CORTEX_DUPLICATE_THRESHOLD:-}
+      CORTEX_APPS: ${CORTEX_APPS:-}
+      CORTEX_APP_ALIASES: ${CORTEX_APP_ALIASES:-}
+      CORTEX_APP_MODE: ${CORTEX_APP_MODE:-}
     volumes:
       - model-cache:/app/.model-cache
     depends_on:
