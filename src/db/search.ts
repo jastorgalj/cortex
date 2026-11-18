@@ -143,10 +143,30 @@ export async function hybridSearch(
 
   const merged = rrfFusion(ftsRows, vecFiltered, RRF_K)
 
-  return merged.slice(0, limit).map((r) => ({
+  const sliced = merged.slice(0, limit)
+
+  // Snippet léxico (D6): ts_headline sobre unaccent(body_md) para resultados lexical/both
+  const lexIds = sliced.filter((r) => r.origin === 'lexical' || r.origin === 'both').map((r) => r.id)
+  const headlineMap = new Map<string, string>()
+  if (lexIds.length > 0) {
+    const idsLiteral = `{${lexIds.join(',')}}`
+    const headlineRows = await prisma.$queryRaw<{ id: string; h: string }[]>(
+      Prisma.sql`
+        SELECT id, ts_headline('spanish', unaccent(body_md), websearch_to_tsquery('spanish', unaccent(${query})), 'MaxWords=35,MinWords=15,StartSel="",StopSel=""') AS h
+        FROM notes
+        WHERE id = ANY(${idsLiteral}::text[])
+      `,
+    )
+    for (const row of headlineRows) {
+      const h = row.h
+      headlineMap.set(row.id, h.length > 400 ? h.substring(0, 400) + '…' : h)
+    }
+  }
+
+  return sliced.map((r) => ({
     id: r.id,
     title: r.title,
-    snippet: extractSnippet(r.body_md),
+    snippet: headlineMap.has(r.id) ? headlineMap.get(r.id)! : extractSnippet(r.body_md),
     score: r.score,
     origin: r.origin,
     app: r.app,

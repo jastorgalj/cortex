@@ -14,7 +14,9 @@ import {
   updateNote,
   listNotes,
   countNotesByApp,
+  listNotesPage,
   getNoteHistory,
+  getNoteHistoryPage,
   softDeleteNote,
   ValidationError,
   NotFoundError,
@@ -26,6 +28,7 @@ import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/co
 import { noteWarnings } from '../db/note-quality.ts'
 import { SessionRegistry } from './sessions.ts'
 import { TOOL_ALIASES, normalizeToolArgs, resolveAuthor } from './args.ts'
+import { respuestaJson, acotarLista, acotarHistorial } from './respuesta.ts'
 
 /** Versión del paquete: `package.json` es la fuente, no un literal que envejece. */
 const PKG_VERSION: string = (
@@ -58,16 +61,6 @@ const APP_DESCRIPTION = (() => {
 })()
 
 // ─── Tool registration ────────────────────────────────────────────────────────
-
-/**
- * Serializa la nota agregando `warnings` solo cuando hay algo que advertir: una
- * nota bien formada devuelve exactamente el JSON de siempre (sin campo extra).
- * No bloqueante — la nota ya se creó/actualizó.
- */
-function withWarnings(note: object, warnings: string[]): string {
-  if (warnings.length === 0) return JSON.stringify(note, null, 2)
-  return JSON.stringify({ ...note, warnings }, null, 2)
-}
 
 function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_search ──────────────────────────────────────────────────────────
@@ -102,7 +95,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           { app, include_general, kind, issue, tags },
           limit ?? 10,
         )
-        return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] }
+        return { content: [{ type: 'text', text: respuestaJson(results) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_search: ${msg}` }], isError: true }
@@ -126,7 +119,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       }
       try {
         const note = await readNote(prisma, id)
-        return { content: [{ type: 'text', text: JSON.stringify(note, null, 2) }] }
+        return { content: [{ type: 'text', text: respuestaJson(note) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {
@@ -205,26 +198,20 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(
-                  {
+                text: respuestaJson({
                     status: 'similar_exists',
                     message:
                       `Se encontraron notas muy similares (umbral coseno: ${umbral}, o mismo issue con título casi igual). ` +
                       'Para fusionar el contenido nuevo con una nota existente, usa cortex_update sobre el id candidato. ' +
                       'Para crear la nota igualmente (aceptando posible duplicado), reintenta con force: true y reason explicando por qué no es un duplicado.',
                     candidates: result.candidates,
-                  },
-                  null,
-                  2,
-                ),
+                  }),
               },
             ],
           }
         }
-        // Warnings de dos fuentes: el vocabulario de `app` (capa de datos) y la
-        // calidad del contenido (heurísticas). Un solo campo para el agente.
         const warnings = [...result.warnings, ...noteWarnings(result.note)]
-        return { content: [{ type: 'text', text: withWarnings(result.note, warnings) }] }
+        return { content: [{ type: 'text', text: respuestaJson(warnings.length > 0 ? { ...result.note, warnings } : result.note) }] }
       } catch (err) {
         if (err instanceof ValidationError) {
           return {
@@ -315,10 +302,8 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           reason,
           base_rev,
         })
-        // `updateNote` puede traer los warnings del vocabulario de `app` en el DTO:
-        // se suman a los de calidad del contenido en el mismo campo.
         const warnings = [...(note.warnings ?? []), ...noteWarnings(note)]
-        return { content: [{ type: 'text', text: withWarnings(note, warnings) }] }
+        return { content: [{ type: 'text', text: respuestaJson(warnings.length > 0 ? { ...note, warnings } : note) }] }
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {
@@ -357,7 +342,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_list ────────────────────────────────────────────────────────────
   server.tool(
     'cortex_list',
-    'Lista notas no borradas con filtros opcionales. Ordenadas por updated_at descendente. No incluye el body_md para mantener la respuesta compacta. Al filtrar por app incluye `general`.',
+    'Lista notas paginada con filtros opcionales. Máximo 200 por llamada. No incluye body_md. Al filtrar por app incluye `general`. Responde total, items y next_offset (seguir paginando si no es null). Las respuestas de cortex_list y cortex_history se recortan a 20.000 caracteres con truncated: true.',
     {
       app: z
         .string()
@@ -374,13 +359,15 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       tags: z.array(z.string()).optional().describe('Filtro por tags (AND: la nota debe tener todos)'),
       author: z.string().optional().describe('Filtro por autor'),
       issue: z.string().optional().describe('Filtro por issue (sin importar mayúsculas ni espacios)'),
+      limit: z.number().int().min(1).max(200).optional().describe('Número de notas por página (default 50, máx 200)'),
+      offset: z.number().int().min(0).optional().describe('Posición de inicio en el listado (default 0)'),
     },
-    async ({ app, include_general, kind, tags, author, issue }) => {
+    async ({ app, include_general, kind, tags, author, issue, limit, offset }) => {
       try {
-        const notes = await listNotes(prisma, { app, include_general, kind, tags, author, issue })
+        const { total, items } = await listNotesPage(prisma, { app, include_general, kind, tags, author, issue }, { limit: limit ?? 50, offset: offset ?? 0 })
         // Excluye body_md para compactar la respuesta en listados
-        const compact = notes.map(({ body_md: _, ...rest }) => rest)
-        return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] }
+        const compact = items.map(({ body_md: _, ...rest }) => rest)
+        return { content: [{ type: 'text', text: respuestaJson(acotarLista({ total, items: compact, offset: offset ?? 0 })) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_list: ${msg}` }], isError: true }
@@ -426,11 +413,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_history ─────────────────────────────────────────────────────────
   server.tool(
     'cortex_history',
-    'Obtiene el historial completo de revisiones de una nota (todas las versiones anteriores a la vigente, ordenadas por rev asc).',
+    'Historial de revisiones de una nota. Por defecto trae metadatos de las 10 revisiones más recientes (sin body_md). include_body trae los cuerpos. rev trae solo esa revisión puntual con su cuerpo (exento del tope de 20.000 chars).',
     {
       id: z.string().describe('Id de la nota (ULID)'),
+      limit: z.number().int().min(1).max(100).optional().describe('Revisiones a devolver (default 10, máx 100); ignorado si se pasa rev'),
+      include_body: z.boolean().optional().describe('Incluir body_md en cada revisión (default false); ignorado si se pasa rev (siempre incluye cuerpo)'),
+      rev: z.number().int().min(1).optional().describe('Devolver solo la revisión con este número, con su cuerpo (la versión vigente no está en el historial: usar cortex_read)'),
     },
-    async ({ id }) => {
+    async ({ id, limit, include_body, rev }) => {
       if (!id?.trim()) {
         return {
           content: [{ type: 'text', text: "Error en cortex_history: el parámetro 'id' es requerido" }],
@@ -438,9 +428,21 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         }
       }
       try {
-        const history = await getNoteHistory(prisma, id)
-        return { content: [{ type: 'text', text: JSON.stringify(history, null, 2) }] }
+        const { total, items } = await getNoteHistoryPage(prisma, id, { limit, rev })
+        if (rev !== undefined) {
+          // Revisión puntual: siempre con cuerpo, sin tope
+          return { content: [{ type: 'text', text: respuestaJson({ total, items }) }] }
+        }
+        // Sin rev: quitar body_md salvo include_body
+        const compact = include_body === true ? items : items.map(({ body_md: _, ...rest }) => rest)
+        return { content: [{ type: 'text', text: respuestaJson(acotarHistorial({ total, items: compact })) }] }
       } catch (err) {
+        if (err instanceof NotFoundError) {
+          return {
+            content: [{ type: 'text', text: `Error en cortex_history: ${err.message}` }],
+            isError: true,
+          }
+        }
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error en cortex_history: ${msg}` }], isError: true }
       }
@@ -493,11 +495,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                { id: result.id, deleted_at: result.deleted_at, rev: result.rev },
-                null,
-                2,
-              ),
+              text: respuestaJson({ id: result.id, deleted_at: result.deleted_at, rev: result.rev }),
             },
           ],
         }

@@ -125,13 +125,13 @@ describe('cortex_delete — validación de parámetros', () => {
     expect(text).toContain("'author'")
 
     // La nota sigue en cortex_list (no fue borrada)
-    const listResult = await client.callTool({ name: 'cortex_list', arguments: {} })
-    const listData = parseToolResult(listResult) as Array<{ id: string }>
+    const listResult = await client.callTool({ name: 'cortex_list', arguments: { limit: 200 } })
+    const listData = (parseToolResult(listResult) as { items: Array<{ id: string }> }).items
     expect(listData.map((n) => n.id)).toContain(noteId)
 
     // El historial no cambió (sigue vacío — solo se creó, no se editó)
     const histResult = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histData = parseToolResult(histResult) as Array<unknown>
+    const histData = (parseToolResult(histResult) as { items: Array<unknown> }).items
     expect(histData.length).toBe(0)
 
     await client.close()
@@ -154,13 +154,13 @@ describe('cortex_delete — validación de parámetros', () => {
     expect(text).toContain("'reason'")
 
     // La nota sigue en cortex_list
-    const listResult = await client.callTool({ name: 'cortex_list', arguments: {} })
-    const listData = parseToolResult(listResult) as Array<{ id: string }>
+    const listResult = await client.callTool({ name: 'cortex_list', arguments: { limit: 200 } })
+    const listData = (parseToolResult(listResult) as { items: Array<{ id: string }> }).items
     expect(listData.map((n) => n.id)).toContain(noteId)
 
     // Historial sin cambios
     const histResult = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histData = parseToolResult(histResult) as Array<unknown>
+    const histData = (parseToolResult(histResult) as { items: Array<unknown> }).items
     expect(histData.length).toBe(0)
 
     await client.close()
@@ -203,7 +203,7 @@ describe('cortex_delete — borrado lógico con rastro en historial', () => {
 
     // Verificación previa: 2 revisiones en history
     const histPre = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histPreData = parseToolResult(histPre) as Array<{ rev: number }>
+    const histPreData = (parseToolResult(histPre) as { items: Array<{ rev: number }> }).items
     expect(histPreData.length).toBe(2)
 
     // Borrar con author=maria, reason=duplicada de otra nota
@@ -219,8 +219,8 @@ describe('cortex_delete — borrado lógico con rastro en historial', () => {
     expect(deleteData.rev).toBe(4)
 
     // cortex_history devuelve 3 revisiones con números 1, 2, 3 sin repetir
-    const histPost = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histPostData = parseToolResult(histPost) as Array<{ rev: number; author: string; reason: string | null; body_md: string }>
+    const histPost = await client.callTool({ name: 'cortex_history', arguments: { id: noteId, include_body: true, limit: 100 } })
+    const histPostData = (parseToolResult(histPost) as { items: Array<{ rev: number; author: string; reason: string | null; body_md: string }> }).items
     expect(histPostData.length).toBe(3)
 
     const revNums = histPostData.map((r) => r.rev)
@@ -236,8 +236,8 @@ describe('cortex_delete — borrado lógico con rastro en historial', () => {
     expect(lastRev.body_md).toContain('Estado final antes del borrado')
 
     // La nota NO aparece en cortex_list
-    const listResult = await client.callTool({ name: 'cortex_list', arguments: {} })
-    const listData = parseToolResult(listResult) as Array<{ id: string }>
+    const listResult = await client.callTool({ name: 'cortex_list', arguments: { limit: 200 } })
+    const listData = (parseToolResult(listResult) as { items: Array<{ id: string }> }).items
     expect(listData.map((n) => n.id)).not.toContain(noteId)
 
     // cortex_search no la devuelve
@@ -279,7 +279,7 @@ describe('cortex_delete — id inexistente o ya borrado', () => {
 
     // No se creó ninguna revisión con ese id
     const histResult = await client.callTool({ name: 'cortex_history', arguments: { id: fakeId } })
-    const histData = parseToolResult(histResult) as Array<unknown>
+    const histData = (parseToolResult(histResult) as { items: Array<unknown> }).items
     expect(histData.length).toBe(0)
 
     await client.close()
@@ -298,7 +298,7 @@ describe('cortex_delete — id inexistente o ya borrado', () => {
 
     // Verifica que hay 1 revisión (la del borrado)
     const histPre = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histPreData = parseToolResult(histPre) as Array<unknown>
+    const histPreData = (parseToolResult(histPre) as { items: Array<unknown> }).items
     expect(histPreData.length).toBe(1)
 
     // Intenta borrar de nuevo
@@ -314,7 +314,7 @@ describe('cortex_delete — id inexistente o ya borrado', () => {
 
     // El historial no creció — sigue con 1 revisión (no se agregó una segunda)
     const histPost = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    const histPostData = parseToolResult(histPost) as Array<unknown>
+    const histPostData = (parseToolResult(histPost) as { items: Array<unknown> }).items
     expect(histPostData.length).toBe(1)
 
     await client.close()
@@ -350,12 +350,12 @@ describe('softDeleteNote — validación en la capa de datos (sin la tool)', () 
     }
 
     // La nota sigue visible en cortex_list y sin revisión de borrado
-    const listResult = await client.callTool({ name: 'cortex_list', arguments: {} })
-    const listData = parseToolResult(listResult) as Array<{ id: string }>
+    const listResult = await client.callTool({ name: 'cortex_list', arguments: { limit: 200 } })
+    const listData = (parseToolResult(listResult) as { items: Array<{ id: string }> }).items
     expect(listData.map((n) => n.id)).toContain(noteId)
 
     const histResult = await client.callTool({ name: 'cortex_history', arguments: { id: noteId } })
-    expect((parseToolResult(histResult) as Array<unknown>).length).toBe(0)
+    expect((parseToolResult(histResult) as { items: Array<unknown> }).items.length).toBe(0)
 
     await client.close()
   })

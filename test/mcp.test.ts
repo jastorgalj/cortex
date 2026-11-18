@@ -194,10 +194,10 @@ describe('MCP server — cortex tools', () => {
       name: 'cortex_history',
       arguments: { id: noteId },
     })
-    const histData = parseToolResult(histResult) as Array<{ rev: number; reason?: string }>
-    expect(histData.length).toBe(1)
-    expect(histData[0]!.rev).toBe(1)
-    expect(histData[0]!.reason).toBe('Agrego paso del gerente de crédito')
+    const histData = parseToolResult(histResult) as { items: Array<{ rev: number; reason?: string }> }
+    expect(histData.items.length).toBe(1)
+    expect(histData.items[0]!.rev).toBe(1)
+    expect(histData.items[0]!.reason).toBe('Agrego paso del gerente de crédito')
 
     await client.close()
   })
@@ -302,10 +302,10 @@ describe('MCP server — cortex tools', () => {
       arguments: {},
     })
 
-    const data = parseToolResult(result) as Array<{ id: string }>
-    expect(Array.isArray(data)).toBe(true)
+    const data = parseToolResult(result) as { items: Array<{ id: string }> }
+    expect(Array.isArray(data.items)).toBe(true)
     // Debe haber al menos la nota del ciclo completo
-    expect(data.length).toBeGreaterThanOrEqual(1)
+    expect(data.items.length).toBeGreaterThanOrEqual(1)
 
     await client.close()
   })
@@ -339,7 +339,7 @@ describe('MCP server — cortex tools', () => {
 
     const before = parseToolResult(
       await client.callTool({ name: 'cortex_list', arguments: {} }),
-    ) as Array<{ id: string }>
+    ) as { total: number }
 
     const result = await client.callTool({
       name: 'cortex_write',
@@ -364,8 +364,8 @@ describe('MCP server — cortex tools', () => {
     // No se creó ninguna nota
     const after = parseToolResult(
       await client.callTool({ name: 'cortex_list', arguments: {} }),
-    ) as Array<{ id: string }>
-    expect(after.length).toBe(before.length)
+    ) as { total: number }
+    expect(after.total).toBe(before.total)
 
     await client.close()
   })
@@ -436,10 +436,10 @@ describe('MCP server — cortex tools', () => {
     // El historial conserva la revisión 1
     const history = parseToolResult(
       await client.callTool({ name: 'cortex_history', arguments: { id: created.id } }),
-    ) as Array<{ rev: number; reason?: string }>
-    expect(history.length).toBe(1)
-    expect(history[0]!.rev).toBe(1)
-    expect(history[0]!.reason).toBe('reclasificada por el agente')
+    ) as { items: Array<{ rev: number; reason?: string }> }
+    expect(history.items.length).toBe(1)
+    expect(history.items[0]!.rev).toBe(1)
+    expect(history.items[0]!.reason).toBe('reclasificada por el agente')
 
     // base_rev obsoleto sigue detectando el conflicto después de la corrección
     const conflict = await client.callTool({
@@ -698,9 +698,9 @@ describe('cortex_search y cortex_list con issue via MCP (5.5)', () => {
 
     const result = await client.callTool({
       name: 'cortex_list',
-      arguments: { issue: 'MCP-ISS-1' },
+      arguments: { issue: 'MCP-ISS-1', limit: 200 },
     })
-    const data = parseToolResult(result) as Array<{ id: string }>
+    const data = (parseToolResult(result) as { items: Array<{ id: string }> }).items
     const ids = data.map((r) => r.id)
 
     expect(ids).toContain(noteMcpIss1Id)
@@ -765,9 +765,9 @@ describe('MCP: force con reason (task 4.5 iv)', () => {
     // cortex_list trae force_reason
     const listResult = await client.callTool({
       name: 'cortex_list',
-      arguments: { app: 'general' },
+      arguments: { app: 'general', limit: 200 },
     })
-    const list = parseToolResult(listResult) as Array<{ id: string; force_reason?: string }>
+    const list = (parseToolResult(listResult) as { items: Array<{ id: string; force_reason?: string }> }).items
     const found = list.find((n) => n.id === created.id)
     expect(found?.force_reason).toBe('es una nota de test, no un duplicado')
 

@@ -75,9 +75,9 @@ devuelven `warnings` cuando aplican; una nota bien formada no lo trae):
 | `cortex_read` | Leer una nota completa por id |
 | `cortex_write` | Crear una nota. Detecta duplicados (umbral 0.75 configurable); `force: true` + `reason` para crear igual |
 | `cortex_update` | Actualizar una nota; puede corregir o quitar `issue` con `reason` y la revisión que se leyó, opcionales |
-| `cortex_list` | Listar notas con filtros (`app` con `general` incluido, `kind`, tags, autor, `issue`) |
+| `cortex_list` | Listar notas paginadas con filtros (`app` con `general` incluido, `kind`, tags, autor, `issue`), `limit` (50 por defecto, máx. 200) y `offset`; responde `total`, `items` y `next_offset` |
 | `cortex_apps` | Ver qué apps existen hoy, cada una con su conteo de notas, más el vocabulario configurado |
-| `cortex_history` | Historial de revisiones de una nota |
+| `cortex_history` | Historial de revisiones: metadatos de las 10 más recientes; `include_body` trae los cuerpos y `rev` una revisión puntual |
 | `cortex_delete` | Borrar una nota (lógico). Exige `author` y `reason`; queda en el historial |
 
 **Vocabulario de `app`.** `app` es texto libre normalizado a minúsculas. Para que el equipo no fragmente
@@ -95,6 +95,8 @@ dos nombres en conflicto. Los alias no aparecen en `tools/list` ni alteran los c
 
 **`issue: null` en `cortex_write`.** Pasar `issue: null`, `""` o `"   "` guarda `null` en la nota.
 Un valor no vacío se guarda tal cual.
+
+Las respuestas de `cortex_list` y `cortex_history` se recortan a 20.000 caracteres con `truncated: true`.
 
 Los errores dicen exactamente qué falta o qué id no existe, para que el agente se corrija solo. El
 patrón de uso: buscar al empezar una tarea, leer lo que sirve, actualizar si la nota ya existe y
