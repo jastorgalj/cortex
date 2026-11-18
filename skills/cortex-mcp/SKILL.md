@@ -40,13 +40,15 @@ Aprendí algo que el equipo debe saber:
 Una nota está mal o sobra    → cortex_delete (author + reason)
 ```
 
+`cortex_list` pagina de a 50 por llamada; seguir con `next_offset` cuando no es `null`. `cortex_history` trae metadatos de las 10 revisiones más recientes; pedir el cuerpo con `rev` para una revisión puntual.
+
 Buscar es parte de empezar, no un extra: una tarea resuelta dos veces porque nadie buscó es el costo que
 Cortex evita.
 
 ## La convención vigente
 
 Las llaves de sistema, los cinco tipos con su esqueleto y las reglas de título, tags y granularidad viven
-en Cortex, no en esta skill: `cortex_list(app: "general", kind: "regla")`. Las notas de `general` son las
+en Cortex, no en esta skill: `cortex_list(app: "general", kind: "regla")` (pagina de 50 por llamada; seguir con `next_offset` cuando no es `null`). Las notas de `general` son las
 transversales: filtrar por cualquier `app` las incluye (salvo `include_general: false`), así que «no hay
 reglas para mi app» casi siempre significa «están en `general`». Leela antes de escribir la primera nota
 de un sistema; si algo no encaja en los cinco tipos, se propone por issue, no se inventa.
