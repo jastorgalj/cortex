@@ -22,6 +22,7 @@ import {
 import { hybridSearch } from '../db/search.ts'
 import { NOTE_KINDS, NOTE_KIND_DESCRIPTIONS, duplicateThreshold } from '../db/constants.ts'
 import { SessionRegistry } from './sessions.ts'
+import { TOOL_ALIASES, normalizeToolArgs, resolveAuthor } from './args.ts'
 
 /** Versión del paquete: `package.json` es la fuente, no un literal que envejece. */
 const PKG_VERSION: string = (
@@ -109,11 +110,12 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
       app: z.string().describe("App a la que pertenece (cartera, huella, general, ...)"),
       kind: z.enum(NOTE_KINDS).describe(`Tipo de nota — ${KIND_DESCRIPTION}`),
       tags: z.array(z.string()).optional().describe('Tags'),
-      author: z.string().describe('Autor de la nota (requerido; se persiste tal cual)'),
+      author: z.string().optional().describe('Autor de la nota (argumento > header x-cortex-author > nombre del cliente MCP > agente; un author inferido no es un author declarado). Obligatorio en cortex_delete.'),
       issue: z
         .string()
+        .nullable()
         .optional()
-        .describe('Issue relacionado (CAR-123, #134, URL — formato libre)'),
+        .describe('Issue relacionado (CAR-123, #134, URL — formato libre); null o vacío guarda null'),
       force: z
         .boolean()
         .optional()
@@ -125,17 +127,25 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           'Obligatorio con force: true: por qué esta nota no es un duplicado de las candidatas. Queda guardado en la nota.',
         ),
     },
-    async ({ title, body_md, app, kind, tags, author, issue, force, reason }) => {
-      if (!author?.trim()) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: "Error en cortex_write: el parámetro 'author' es requerido y no puede estar vacío",
-            },
-          ],
-          isError: true,
+    async ({ title, body_md, app, kind, tags, author, issue, force, reason }, extra) => {
+      if (author !== undefined) {
+        if (!author?.trim()) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: "Error en cortex_write: el parámetro 'author' es requerido y no puede estar vacío",
+              },
+            ],
+            isError: true,
+          }
         }
+      } else {
+        const headerRaw = extra?.requestInfo?.headers?.['x-cortex-author']
+        author = resolveAuthor({
+          header: Array.isArray(headerRaw) ? headerRaw[0] : headerRaw,
+          clientName: server.server.getClientVersion()?.name,
+        })
       }
       try {
         const result = await createNote(prisma, {
@@ -212,7 +222,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
         .nullable()
         .optional()
         .describe('Issue relacionado (omite para no cambiar; null para quitarlo; string vacío es error)'),
-      author: z.string().describe('Autor del cambio (requerido)'),
+      author: z.string().optional().describe('Autor del cambio (argumento > header x-cortex-author > nombre del cliente MCP > agente; un author inferido no es un author declarado). Obligatorio en cortex_delete.'),
       reason: z.string().optional().describe('Motivo del cambio (queda registrado en la revisión)'),
       base_rev: z
         .number()
@@ -222,17 +232,25 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           'Revisión esperada (rev vigente leída antes de editar). Si no coincide con la actual, rechaza con ConflictError.',
         ),
     },
-    async ({ id, title, body_md, tags, app, kind, issue, author, reason, base_rev }) => {
-      if (!author?.trim()) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: "Error en cortex_update: el parámetro 'author' es requerido y no puede estar vacío",
-            },
-          ],
-          isError: true,
+    async ({ id, title, body_md, tags, app, kind, issue, author, reason, base_rev }, extra) => {
+      if (author !== undefined) {
+        if (!author?.trim()) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: "Error en cortex_update: el parámetro 'author' es requerido y no puede estar vacío",
+              },
+            ],
+            isError: true,
+          }
         }
+      } else {
+        const headerRaw = extra?.requestInfo?.headers?.['x-cortex-author']
+        author = resolveAuthor({
+          header: Array.isArray(headerRaw) ? headerRaw[0] : headerRaw,
+          clientName: server.server.getClientVersion()?.name,
+        })
       }
       if (!id?.trim()) {
         return {
@@ -430,6 +448,41 @@ function createSession(prisma: PrismaClient): WebStandardStreamableHTTPServerTra
 
   registerTools(mcpServer, prisma)
   mcpServer.connect(transport)
+
+  // ── Wrapper de alias: intercepta tools/call antes de delegar al SDK ──────────
+  // onmessage ya está asignado de forma síncrona por mcpServer.connect (medido en F0).
+  const originalOnmessage = transport.onmessage
+  transport.onmessage = (
+    msg: Parameters<NonNullable<typeof transport.onmessage>>[0],
+    options?: Parameters<NonNullable<typeof transport.onmessage>>[1],
+  ) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const m = msg as any
+    const toolName: string | undefined = m.method === 'tools/call' ? m.params?.name : undefined
+    if (
+      toolName &&
+      toolName in TOOL_ALIASES &&
+      typeof m.params?.arguments === 'object' &&
+      m.params?.arguments !== null
+    ) {
+      const normResult = normalizeToolArgs(toolName, m.params.arguments as Record<string, unknown>)
+      if (!normResult.ok) {
+        const text = `Error en ${toolName}: '${normResult.a}' y '${normResult.b}' llegaron con valores distintos; envía solo '${normResult.canonical}'`
+        void transport.send(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          { jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text }], isError: true } } as any,
+          { relatedRequestId: m.id },
+        )
+        return
+      }
+      originalOnmessage?.(
+        { ...msg, params: { ...m.params, arguments: normResult.args } } as typeof msg,
+        options,
+      )
+      return
+    }
+    originalOnmessage?.(msg, options)
+  }
 
   return transport
 }

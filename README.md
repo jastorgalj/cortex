@@ -40,7 +40,7 @@ para todo el equipo, así que no hay `pull`, ni ramas de conocimiento, ni confli
 | `app` | A qué sistema pertenece: `cartera`, `huella`, `api-scoring`, `general`, nombre del repo… |
 | `kind` | `sistema`, `flujo`, `decision`, `pitfall`, `regla` |
 | `tags` | Libres. Los que empiezan con `origen:` los reserva el importador |
-| `author` | Quién la escribe. **Obligatorio** en toda escritura |
+| `author` | Quién la escribe. Obligatorio en `cortex_delete`; opcional en `cortex_write`/`cortex_update` (cadena de resolución: argumento > header `x-cortex-author` > nombre del cliente MCP > `agente`; un author inferido no es un author declarado). |
 | `issue` | Ticket de origen, opcional (`CAR-287`, `#134`, una URL) — se puede filtrar con `cortex_list` y `cortex_search`, y corregir con `cortex_update` |
 
 Tres reglas que hacen que la memoria no se degrade:
@@ -67,6 +67,15 @@ Tres reglas que hacen que la memoria no se degrade:
 | `cortex_list` | Listar notas con filtros (`app`, `kind`, tags, autor, `issue`) |
 | `cortex_history` | Historial de revisiones de una nota |
 | `cortex_delete` | Borrar una nota (lógico). Exige `author` y `reason`; queda en el historial |
+
+**Alias de argumentos.** Las tools aceptan claves equivalentes para facilitar la integración con
+agentes que usan nombres distintos: `query` o `text` como alias de `q` en `cortex_search`; `body`,
+`content` o `markdown` como alias de `body_md` en `cortex_write` y `cortex_update`. Si se envían
+el nombre canónico y un alias con valores distintos, la tool responde `isError: true` indicando los
+dos nombres en conflicto. Los alias no aparecen en `tools/list` ni alteran los campos `required`.
+
+**`issue: null` en `cortex_write`.** Pasar `issue: null`, `""` o `"   "` guarda `null` en la nota.
+Un valor no vacío se guarda tal cual.
 
 Los errores dicen exactamente qué falta o qué id no existe, para que el agente se corrija solo. El
 patrón de uso: buscar al empezar una tarea, leer lo que sirve, actualizar si la nota ya existe y
