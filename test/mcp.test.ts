@@ -2,7 +2,7 @@
  * test/mcp.test.ts — Task 3.1: MCP server de integración.
  *
  * Verifica:
- * - tools/list devuelve exactamente las seis tools nombradas
+ * - tools/list devuelve exactamente las ocho tools nombradas
  * - Ciclo write→search→read→update→history funciona de punta a punta por MCP real
  *
  * Usa Client + StreamableHTTPClientTransport del SDK oficial.
@@ -770,6 +770,98 @@ describe('MCP: force con reason (task 4.5 iv)', () => {
     const list = (parseToolResult(listResult) as { items: Array<{ id: string; force_reason?: string }> }).items
     const found = list.find((n) => n.id === created.id)
     expect(found?.force_reason).toBe('es una nota de test, no un duplicado')
+
+    await client.close()
+  })
+})
+
+// ─── MCP: modo estricto (task 3.3) ────────────────────────────────────────────
+
+describe('MCP: CORTEX_STRICT_NOTES rechaza bitácoras; force no lo anula', () => {
+  test('bitácora con force+reason y CORTEX_STRICT_NOTES=1 → isError con "title" y "force"', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const listBefore = parseToolResult(
+      await client.callTool({ name: 'cortex_list', arguments: { limit: 1 } }),
+    ) as { total: number }
+    const totalBefore = listBefore.total
+
+    process.env.CORTEX_STRICT_NOTES = '1'
+    try {
+      const result = await client.callTool({
+        name: 'cortex_write',
+        arguments: {
+          title: 'Cierre SEC-2: MR !44 mergeado',
+          body_md: 'Registro del cierre del ticket de seguridad.',
+          app: 'general',
+          kind: 'regla',
+          author: 'mcp-test-strict',
+          force: true,
+          reason: 'test de modo estricto',
+        },
+      })
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      const text = textOf(result)
+      expect(text.toLowerCase()).toContain('title')
+      expect(text.toLowerCase()).toContain('force')
+
+      // El conteo no cambia
+      const listAfter = parseToolResult(
+        await client.callTool({ name: 'cortex_list', arguments: { limit: 1 } }),
+      ) as { total: number }
+      expect(listAfter.total).toBe(totalBefore)
+    } finally {
+      delete process.env.CORTEX_STRICT_NOTES
+    }
+
+    await client.close()
+  })
+
+  test('app desconocida con CORTEX_APP_MODE=strict y force → isError sobre "app"', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const savedApps = process.env.CORTEX_APPS
+    const savedMode = process.env.CORTEX_APP_MODE
+    process.env.CORTEX_APPS = 'backend,general'
+    process.env.CORTEX_APP_MODE = 'strict'
+    try {
+      const result = await client.callTool({
+        name: 'cortex_write',
+        arguments: {
+          title: 'Nota test app desconocida strict MCP',
+          body_md: 'Contenido de prueba para modo strict de app.',
+          app: 'sistema-nuevo',
+          kind: 'regla',
+          author: 'mcp-test-strict',
+          force: true,
+          reason: 'test strict app mode',
+        },
+      })
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      const text = textOf(result)
+      expect(text.toLowerCase()).toContain('app')
+    } finally {
+      if (savedApps === undefined) delete process.env.CORTEX_APPS
+      else process.env.CORTEX_APPS = savedApps
+      if (savedMode === undefined) delete process.env.CORTEX_APP_MODE
+      else process.env.CORTEX_APP_MODE = savedMode
+    }
+
+    await client.close()
+  })
+
+  test('descripción de cortex_write menciona CORTEX_STRICT_NOTES y que force no anula el rechazo', async () => {
+    const client = makeClient()
+    await connectClient(client)
+
+    const tools = await client.listTools()
+    const writeTool = tools.tools.find((t) => t.name === 'cortex_write')
+    expect(writeTool).toBeDefined()
+    const desc = writeTool!.description ?? ''
+    expect(desc).toContain('CORTEX_STRICT_NOTES')
+    expect(desc.toLowerCase()).toContain('force no anula')
 
     await client.close()
   })

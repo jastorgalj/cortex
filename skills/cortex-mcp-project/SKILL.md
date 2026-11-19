@@ -133,7 +133,7 @@ umbral de deduplicación. Reglas:
 
 ```bash
 export PATH="$HOME/.bun/bin:$PATH" && cd ~/develop/varios/cortex
-bun run typecheck && bun test          # 66 tests (baseline ago-2026)
+bun run typecheck && bun test          # conteo actual: ver salida de bun test
 # drift contra la base real:
 bunx prisma migrate diff --from-url "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" \
   --to-schema-datamodel prisma/schema.prisma --script            # "empty migration"
@@ -148,7 +148,7 @@ No borres `prisma/migrations/` para "empezar limpio": hay una sola migración y 
 Prisma pierde `vector`, el HNSW, el índice parcial y el trigger FTS.
 
 Smoke contra la base real: `GET /health` (`model_loaded: true`), `GET /` (200), MCP
-`initialize` + `tools/list` (8 tools `cortex_*`). Las tools usan `q`, no `query`.
+`initialize` + `tools/list` (8 tools `cortex_*`). Las tools aceptan tanto `q` como `query` (alias desde #21).
 
 ## Distribución: imagen publicada y skill sin clonar
 

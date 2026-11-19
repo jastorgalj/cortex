@@ -98,12 +98,11 @@ describe('tools/list', () => {
     expect(writeSchema.required ?? []).not.toContain('author')
     // issue debe aceptar string y null
     const issueProp = writeSchema.properties?.issue as { anyOf?: Array<{ type: string }>; type?: string | string[] } | undefined
-    if (issueProp) {
-      const typesAllowed = issueProp.anyOf
-        ? issueProp.anyOf.map((t) => (t as { type: string }).type)
-        : Array.isArray(issueProp.type) ? issueProp.type : [issueProp.type]
-      expect(typesAllowed).toContain('null')
-    }
+    expect(issueProp).toBeDefined()
+    const typesAllowed = issueProp!.anyOf
+      ? issueProp!.anyOf.map((t) => (t as { type: string }).type)
+      : Array.isArray(issueProp!.type) ? issueProp!.type : [issueProp!.type]
+    expect(typesAllowed).toContain('null')
 
     // cortex_update: author NO requerido
     const update = tools.tools.find((t) => t.name === 'cortex_update')!

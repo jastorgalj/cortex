@@ -136,7 +136,7 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
   // ── cortex_write ───────────────────────────────────────────────────────────
   server.tool(
     'cortex_write',
-    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente. La nota creada puede volver con un campo warnings (no bloqueante) si el contenido parece bitácora o no calza con su kind.',
+    'Crea una nueva nota de conocimiento. Si existen notas muy similares (coseno ≥ umbral configurable, o mismo issue con título casi igual), responde con status similar_exists y los candidatos; usa force: true (con reason obligatorio) para crear igualmente. La nota creada puede volver con un campo warnings (no bloqueante) si el contenido parece bitácora o no calza con su kind. Con CORTEX_STRICT_NOTES activo, una bitácora se rechaza en lugar de advertir; en ese caso force no anula el rechazo.',
     {
       title: z.string().describe('Título de la nota'),
       body_md: z.string().describe('Contenido en Markdown'),
@@ -388,18 +388,14 @@ function registerTools(server: McpServer, prisma: PrismaClient): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                {
-                  apps,
-                  vocabulary: {
-                    canonicas: [...new Set([...config.apps, GENERAL_APP])],
-                    modo: config.mode,
-                    aliases: config.aliases,
-                  },
+              text: respuestaJson({
+                apps,
+                vocabulary: {
+                  canonicas: [...new Set([...config.apps, GENERAL_APP])],
+                  modo: config.mode,
+                  aliases: config.aliases,
                 },
-                null,
-                2,
-              ),
+              }),
             },
           ],
         }

@@ -62,7 +62,10 @@ devuelven `warnings` cuando aplican; una nota bien formada no lo trae):
 - **Bitácoras.** Un título de registro de actividad (`Cierre …`, `Sesión …`, `Log …`), una referencia
   `MR !N` / `PR #N` en el título o una fecha al inicio del título o del cuerpo se advierten: Cortex
   guarda conocimiento reutilizable, no el registro de lo que pasó. Con `CORTEX_STRICT_NOTES=1` la
-  escritura se rechaza (`ValidationError`) en vez de advertir.
+  escritura se rechaza (`ValidationError`) en vez de advertir. `force` no anula `CORTEX_STRICT_NOTES`
+  ni `CORTEX_APP_MODE=strict`; para importar notas con títulos fechados hay que desactivar
+  `CORTEX_STRICT_NOTES` durante la importación (decisión D1, 2026-11-18). El importador queda sujeto
+  a ambos modos.
 - **Contenido que no calza con su `kind`.** `decision` sin motivo ni alternativa descartada, `pitfall`
   sin causa o sin arreglo, `flujo` sin lista de pasos: el warning incluye el esqueleto esperado
   (tomado de la descripción del tipo).
@@ -121,7 +124,7 @@ Verificación:
 
 ```bash
 curl http://localhost:3091/health
-# -> {"status":"ok","notes":0,"model_loaded":true}
+# -> {"status":"ok","notes":0,"model_loaded":true,"sessions":0,"uptime_s":0}
 ```
 
 `status: ok` es el servidor funcionando, `notes: 0` es lo esperado en una base recién migrada y

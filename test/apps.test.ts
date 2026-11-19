@@ -13,10 +13,13 @@ import { PrismaClient } from '@prisma/client'
 import {
   createNote,
   listNotes,
+  listNotesPage,
+  softDeleteNote,
   countNotesByApp,
   ValidationError,
 } from '../src/db/notes.ts'
 import { hybridSearch } from '../src/db/search.ts'
+import { lexicalSearch } from '../src/db/notes.ts'
 import { resolveApp, appFilterValues, getAppConfig, GENERAL_APP } from '../src/db/apps.ts'
 import { warmup } from '../src/db/embeddings.ts'
 
@@ -237,5 +240,58 @@ describe('countNotesByApp', () => {
     expect(byApp.get('general')).toBeGreaterThanOrEqual(1)
     expect(byApp.get('backend')).toBeGreaterThanOrEqual(2)
     expect(byApp.get('inventada')).toBe(1)
+  })
+})
+
+// ─── filtro app en blanco (task 3.4a y 3.4e) ─────────────────────────────────
+
+describe('filtro app en blanco: listNotes y listNotesPage no filtran', () => {
+  test('listNotes({ app: "   " }) devuelve el mismo total que sin app', async () => {
+    const all = await listNotes(prisma)
+    const blank = await listNotes(prisma, { app: '   ' })
+    expect(blank.length).toBe(all.length)
+  })
+
+  test('listNotesPage({ app: "   " }) devuelve el mismo total que sin app', async () => {
+    const all = await listNotesPage(prisma, {}, { limit: 1000, offset: 0 })
+    const blank = await listNotesPage(prisma, { app: '   ' }, { limit: 1000, offset: 0 })
+    expect(blank.total).toBe(all.total)
+  })
+
+  test('hybridSearch({ app: "   " }) devuelve el mismo total que sin app', async () => {
+    const all = await hybridSearch(prisma, 'custodia garantías', {}, 100)
+    const blank = await hybridSearch(prisma, 'custodia garantías', { app: '   ' }, 100)
+    expect(blank.length).toBe(all.length)
+  })
+
+  test('lexicalSearch({ app: "   " }) devuelve el mismo total que sin app', async () => {
+    const all = await lexicalSearch(prisma, 'custodia')
+    const blank = await lexicalSearch(prisma, 'custodia', { app: '   ' })
+    expect(blank.length).toBe(all.length)
+  })
+})
+
+describe('countNotesByApp: no cuenta notas borradas', () => {
+  test('una nota borrada lógicamente no aparece en el conteo', async () => {
+    const writeResult = await createNote(prisma, {
+      title: 'Nota para borrar en test countNotesByApp',
+      body_md: 'Cuerpo de nota de test que se va a borrar para verificar conteo.',
+      app: 'backend',
+      kind: 'regla',
+      author: 'apps-test',
+      force: true,
+      reason: 'fixture borrado',
+    })
+    if (writeResult.status !== 'created') throw new Error('createNote: esperaba status created')
+    const noteId = writeResult.note.id
+
+    const before = await countNotesByApp(prisma)
+    const backendBefore = before.find((r) => r.app === 'backend')?.count ?? 0
+
+    await softDeleteNote(prisma, noteId, 'apps-test', 'borrar fixture de test')
+
+    const after = await countNotesByApp(prisma)
+    const backendAfter = after.find((r) => r.app === 'backend')?.count ?? 0
+    expect(backendAfter).toBe(backendBefore - 1)
   })
 })

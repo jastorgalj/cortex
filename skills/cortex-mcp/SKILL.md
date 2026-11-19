@@ -83,6 +83,9 @@ Leé las candidatas: traen `app`, `kind`, `issue`, `matched_by` (`coseno` o `iss
 - **Buscá con `cortex_search` antes de crear**: una paráfrasis de otra nota puede quedar bajo el umbral
   y no avisar. Si no encontrás nada, recién creá.
 - Nunca dos notas para lo mismo: la segunda se desactualiza y miente.
+- `cortex_write` y `cortex_update` pueden devolver un campo `warnings` (no bloqueante) cuando el
+  contenido parece una bitácora o no calza con su `kind`; una nota bien formada no lo trae. Con
+  `CORTEX_STRICT_NOTES=1` la bitácora se rechaza en lugar de advertir, y `force` no anula ese rechazo.
 
 ## Concurrencia: dos agentes, una nota
 

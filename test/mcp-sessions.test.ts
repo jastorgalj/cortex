@@ -4,7 +4,7 @@
  * Flujo crudo con fetch, sin cliente SDK:
  *  - tools/list con un mcp-session-id inventado → 404 JSON-RPC (error.code -32001, id null)
  *  - initialize sin id → 200 con mcp-session-id nuevo
- *  - tools/list con ese id → 200 y lista las 7 tools
+ *  - tools/list con ese id → 200 y lista las 8 tools
  *
  * Patrón de test/mcp.test.ts: createApp() en puerto propio 13192.
  */

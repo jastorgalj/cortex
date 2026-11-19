@@ -478,3 +478,83 @@ THEN `items` tiene 12 elementos con `rev` 1 a 12
 GIVEN una nota con revisiones
 WHEN se llama `cortex_history` con `limit: 0`, con `limit: 101` o con `rev: 0`
 THEN cada llamada responde error y el mensaje nombra el parámetro inválido
+
+### Requirement: La escritura avisa cuando el contenido no calza con su tipo
+
+`cortex_write` y `cortex_update` SHALL responder con un campo opcional `warnings` (lista de textos) cuando
+el contenido parece bitácora o no tiene la forma que su `kind` promete; la escritura SHALL completarse
+igual —el aviso no bloquea— y una nota bien formada SHALL responder sin el campo. Con
+`CORTEX_STRICT_NOTES` activo, la creación de una bitácora SHALL rechazarse con `ValidationError`.
+
+#### Scenario: Bitácora creada con aviso
+
+GIVEN una nota nueva con título `Cierre ABC-1: MR !93 mergeado`
+WHEN se llama `cortex_write` en el modo por defecto
+THEN la nota se crea y la respuesta incluye `warnings` con un texto que dice que parece bitácora y que
+Cortex guarda conocimiento reutilizable
+
+#### Scenario: Nota bien formada sin warnings
+
+GIVEN una nota nueva sobre cómo funciona un módulo, sin marcas de bitácora y con el contenido que su
+`kind` describe
+WHEN se llama `cortex_write`
+THEN la nota se crea y la respuesta no incluye `warnings`
+
+#### Scenario: pitfall sin causa advierte con el esqueleto esperado
+
+GIVEN una nota con `kind: "pitfall"` cuyo cuerpo no nombra causa ni arreglo
+WHEN se llama `cortex_write`
+THEN la respuesta incluye `warnings` con el esqueleto esperado del tipo (síntoma, causa, arreglo) tomado
+de la descripción del `kind`
+
+#### Scenario: Modo estricto rechaza la bitácora
+
+GIVEN `CORTEX_STRICT_NOTES` activo
+WHEN se llama `cortex_write` con título de bitácora y el resto de los campos válidos
+THEN responde `ValidationError` nombrando el campo donde se detectó el patrón y no crea ninguna nota
+
+### Requirement: El modo estricto de bitácoras no se salta con force
+
+Con `CORTEX_STRICT_NOTES` activo, `cortex_write` SHALL rechazar una nota con aspecto de bitácora aunque traiga `force: true` y `reason`; `force` solo anula la detección de duplicados. Razón: `force` lleva un texto libre del propio agente; si bastara para saltar la política, el modo estricto sería decorativo.
+
+#### Scenario: Bitácora con force en modo estricto
+
+GIVEN `CORTEX_STRICT_NOTES` activo
+WHEN se llama `cortex_write` con título `Cierre SEC-2: MR !44 mergeado`, `force: true` y `reason: "es un cierre legítimo"`
+THEN responde `isError: true` sobre el campo `title` y no se crea ninguna nota
+
+### Requirement: El rechazo estricto explica que force no lo evita
+
+El mensaje de rechazo por bitácora SHALL decir que `force` no lo evita, y la descripción de `cortex_write` SHALL nombrar `CORTEX_STRICT_NOTES` y declarar que `force` no lo anula. Razón: la descripción vigente manda a usar `force: true` «para crear igualmente», y el agente que la sigue gasta un turno en un reintento que falla igual.
+
+#### Scenario: El mensaje dice que force no lo evita
+
+GIVEN `CORTEX_STRICT_NOTES` activo
+WHEN se llama `cortex_write` con título `Cierre SEC-2: MR !44 mergeado`
+THEN el texto de error contiene `force` y dice que no evita el rechazo
+
+#### Scenario: La descripción de cortex_write declara el modo estricto
+
+GIVEN el servidor levantado
+WHEN un cliente MCP envía `tools/list`
+THEN la descripción de `cortex_write` nombra `CORTEX_STRICT_NOTES` y dice que `force` no lo anula
+
+### Requirement: El modo strict de apps no se salta con force
+
+Con `CORTEX_APPS` declarado y `CORTEX_APP_MODE=strict`, `cortex_write` SHALL rechazar un `app` fuera del vocabulario aunque traiga `force: true` y `reason`. Razón: es una validación de datos, no de duplicados; `force` no la cubre.
+
+#### Scenario: App desconocida con force en modo strict de apps
+
+GIVEN `CORTEX_APPS: "backend,console,general"` y `CORTEX_APP_MODE: "strict"`
+WHEN se llama `cortex_write` con `app: "sistema-nuevo"`, `force: true` y `reason` no vacío
+THEN responde `isError: true` sobre el campo `app` y no se crea ninguna nota
+
+### Requirement: El importador queda sujeto a los modos estrictos
+
+El comando de importación SHALL aplicar `CORTEX_STRICT_NOTES` y `CORTEX_APP_MODE=strict` como cualquier escritura: un archivo rechazado SHALL contarse como error con el mensaje de rechazo, y los demás SHALL importarse. Razón: el importador escribe con `force: true` por diseño y `force` no anula los modos estrictos.
+
+#### Scenario: Learning con título de bitácora en modo estricto
+
+GIVEN `CORTEX_STRICT_NOTES` activo y un repo con un learning de título `2026-11-10 rotación de claves` y otro de título normal
+WHEN corre el comando de importación
+THEN el reporte cuenta 1 creada y 1 error con el mensaje de rechazo, y el proceso termina con código 1

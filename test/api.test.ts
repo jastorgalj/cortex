@@ -393,3 +393,127 @@ describe('GET /api/search — filtros issue y tags (5.7)', () => {
     expect(apiIds).toEqual(dbIds)
   })
 })
+
+// ─── filtro app en blanco via REST (task 3.4b) ───────────────────────────────
+
+describe('GET /api/search: app en blanco no filtra', () => {
+  test('app=%20%20%20 devuelve el mismo total que sin app', async () => {
+    const q = 'tasa+especial'
+    const rAll = await fetch(`${BASE_URL}/api/search?q=${q}`)
+    const rBlank = await fetch(`${BASE_URL}/api/search?q=${q}&app=%20%20%20`)
+    expect(rAll.status).toBe(200)
+    expect(rBlank.status).toBe(200)
+    const allResults = await rAll.json() as Array<{ id: string }>
+    const blankResults = await rBlank.json() as Array<{ id: string }>
+    expect(blankResults.length).toBe(allResults.length)
+  })
+})
+
+// ─── GET /api/apps (task 3.4d) ───────────────────────────────────────────────
+
+describe('GET /api/apps', () => {
+  test('responde con apps (array) y vocabulary (canonicas, modo, aliases)', async () => {
+    const r = await fetch(`${BASE_URL}/api/apps`)
+    expect(r.status).toBe(200)
+    const body = await r.json() as {
+      apps: Array<{ app: string; count: number }>
+      vocabulary: { canonicas: string[]; modo: string | null; aliases: Record<string, string> }
+    }
+    expect(Array.isArray(body.apps)).toBe(true)
+    expect(body.apps.length).toBeGreaterThan(0)
+    expect(Array.isArray(body.vocabulary.canonicas)).toBe(true)
+    expect(body.vocabulary.canonicas).toContain('general')
+    expect('modo' in body.vocabulary).toBe(true)
+    expect('aliases' in body.vocabulary).toBe(true)
+  })
+})
+
+// ─── MCP cortex_list include_general:false (task 3.4c) ───────────────────────
+
+describe('cortex_list por MCP: include_general:false solo trae la app pedida', () => {
+  test('con app=cartera e include_general:false no hay notas general', async () => {
+    const client = new Client({ name: 'api-test-ig', version: '1.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`))
+    await client.connect(transport)
+
+    const result = await client.callTool({
+      name: 'cortex_list',
+      arguments: { app: 'cartera', include_general: false, limit: 100 },
+    })
+    const content = result.content as Array<{ type: string; text?: string }>
+    const text = content.find((c) => c.type === 'text')?.text ?? ''
+    const data = JSON.parse(text) as { items: Array<{ app: string }> }
+    expect(data.items.every((n) => n.app === 'cartera')).toBe(true)
+
+    await client.close()
+  })
+})
+
+// ─── GET /api/search include_general=false (task 3.4d) ───────────────────────
+
+describe('GET /api/search: include_general=false excluye general', () => {
+  test('resultados no contienen notas de general cuando include_general=false', async () => {
+    // Crear nota en app cartera para que haya resultados
+    const r = await fetch(`${BASE_URL}/api/search?q=tasa+especial&app=cartera&include_general=false`)
+    expect(r.status).toBe(200)
+    const results = await r.json() as Array<{ app: string }>
+    // Si hay resultados, ninguno debe ser general
+    expect(results.every((n) => n.app !== 'general')).toBe(true)
+  })
+})
+
+// ─── cortex_apps por MCP: nota borrada no se cuenta (task 3.4e) ──────────────
+
+describe('cortex_apps por MCP: notas borradas no se cuentan', () => {
+  test('crear y borrar una nota reduce el conteo de su app', async () => {
+    const client = new Client({ name: 'api-test-apps', version: '1.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`))
+    await client.connect(transport)
+
+    // Conteo antes
+    const before = await client.callTool({ name: 'cortex_apps', arguments: {} })
+    const beforeText = (before.content as Array<{ type: string; text?: string }>)
+      .find((c) => c.type === 'text')?.text ?? ''
+    const beforeData = JSON.parse(beforeText) as {
+      apps: Array<{ app: string; count: number }>
+    }
+    const carteraCountBefore = beforeData.apps.find((a) => a.app === 'cartera')?.count ?? 0
+
+    // Crear nota en cartera
+    const writeResult = await client.callTool({
+      name: 'cortex_write',
+      arguments: {
+        title: 'Nota temp para test cortex_apps borrado',
+        body_md: 'Contenido temporal para verificar que cortex_apps no cuenta borradas.',
+        app: 'cartera',
+        kind: 'regla',
+        author: 'api-test-apps',
+        force: true,
+        reason: 'fixture test borrado',
+      },
+    })
+    const writeContent = writeResult.content as Array<{ type: string; text?: string }>
+    const writeText = writeContent.find((c) => c.type === 'text')?.text ?? ''
+    const writeData = JSON.parse(writeText) as { id: string }
+    const tempId = writeData.id
+
+    // Borrar nota
+    await client.callTool({
+      name: 'cortex_delete',
+      arguments: { id: tempId, author: 'api-test-apps', reason: 'fixture test borrado' },
+    })
+
+    // Conteo después: debe volver al valor original
+    const after = await client.callTool({ name: 'cortex_apps', arguments: {} })
+    const afterText = (after.content as Array<{ type: string; text?: string }>)
+      .find((c) => c.type === 'text')?.text ?? ''
+    const afterData = JSON.parse(afterText) as {
+      apps: Array<{ app: string; count: number }>
+    }
+    const carteraCountAfter = afterData.apps.find((a) => a.app === 'cartera')?.count ?? 0
+
+    expect(carteraCountAfter).toBe(carteraCountBefore)
+
+    await client.close()
+  })
+})

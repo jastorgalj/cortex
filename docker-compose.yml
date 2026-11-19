@@ -28,6 +28,8 @@ services:
       CORTEX_APPS: ${CORTEX_APPS:-}
       CORTEX_APP_ALIASES: ${CORTEX_APP_ALIASES:-}
       CORTEX_APP_MODE: ${CORTEX_APP_MODE:-}
+      CORTEX_STRICT_NOTES: ${CORTEX_STRICT_NOTES:-}
+      MCP_SESSION_TTL_MINUTES: ${MCP_SESSION_TTL_MINUTES:-1440}
     volumes:
       - model-cache:/app/.model-cache
     depends_on:
