@@ -763,6 +763,11 @@ describe('Las respuestas JSON de las tools son compactas', () => {
     const write3Text = textOf(write3)
     const write3Obj = JSON.parse(write3Text)
     expect(write3Text).toBe(JSON.stringify(write3Obj))
+    // cortex_apps
+    const appsText = textOf(await client.callTool({ name: 'cortex_apps', arguments: {} }))
+    const appsObj = JSON.parse(appsText)
+    expect(appsText).toBe(JSON.stringify(appsObj)) // sin indentación
+
     expect((write3Obj as { status?: string }).status).toBe('similar_exists')
 
     await client.close()

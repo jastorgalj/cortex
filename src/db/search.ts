@@ -81,7 +81,7 @@ export async function hybridSearch(
   filter: SearchFilter = {},
   limit = 10,
 ): Promise<SearchResult[]> {
-  const appCond = filter.app
+  const appCond = filter.app?.trim()
     ? Prisma.sql`AND app IN (${Prisma.join(appFilterValues(filter.app, filter.include_general !== false))})`
     : Prisma.empty
   const kindCond = filter.kind ? Prisma.sql`AND kind = ${filter.kind}` : Prisma.empty

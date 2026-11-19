@@ -24,6 +24,11 @@ se guarda el modelo ONNX; por defecto `~/.model-cache/knowledge-mcp`) y `CORTEX_
 El primer arranque descarga y carga el modelo (puede tardar unos minutos) y `GET /health` reporta `model_loaded`.
 `MCP_SESSION_TTL_MINUTES` (opcional, defecto 1440) fija cuántos minutos de inactividad aguanta una
 sesión MCP antes de que el barrido la cierre.
+`CORTEX_STRICT_NOTES` (opcional; `1` activa el modo estricto: las bitácoras se rechazan en lugar de
+advertir; `force` no anula este rechazo).
+`CORTEX_APPS` (opcional; lista separada por comas de apps válidas).
+`CORTEX_APP_ALIASES` (opcional; JSON de alias → canónico, ej. `{"back":"backend"}`).
+`CORTEX_APP_MODE` (opcional; `warn` o `strict`; en `strict` una app fuera del vocabulario se rechaza).
 
 > **Aplicá migraciones con `migrate deploy`, no con `migrate dev`.** Las migraciones incluyen SQL a mano
 > que el datamodel no puede expresar (índice HNSW del embedding e índice parcial de `deleted_at`).
@@ -51,7 +56,7 @@ El compose del repo levanta el servidor con su propio Postgres, sin escribir el 
 git clone https://github.com/jastorgalj/cortex.git cortex && cd cortex
 docker compose up --build -d
 curl http://localhost:3091/health
-# -> {"status":"ok","notes":0,"model_loaded":true}
+# -> {"status":"ok","notes":0,"model_loaded":true,"sessions":0,"uptime_s":0}
 ```
 
 El `.env` es opcional: sin él, el servicio `server` apunta al `db` del compose. Para usar otra base, poné
@@ -88,13 +93,13 @@ que dos escrituras simultáneas no se pisen:
 - **Ids ULID generados en el cliente** (`src/db/ulid.ts`): sin secuencias ni coordinación entre procesos,
   y ordenables por tiempo.
 - **Bloqueo de fila antes de escribir.** `updateNote` abre una transacción y hace `SELECT … FOR UPDATE`
-  sobre la nota (`src/db/notes.ts:273`), así que dos updates de la misma nota se serializan.
+  sobre la nota (`src/db/notes.ts:481`), así que dos updates de la misma nota se serializan.
 - **Revisión optimista (`base_rev`).** Si el llamador leyó la nota en `rev: 1` y alguien más ya la dejó
   en `rev: 2`, el servidor **rechaza con `ConflictError`** e informa la revisión vigente
-  (`src/db/notes.ts:282`) en vez de sobreescribir. La tool devuelve el conflicto al agente, que debe
+  (`src/db/notes.ts:488`) en vez de sobreescribir. La tool devuelve el conflicto al agente, que debe
   releer y reintentar; sin `base_rev` gana el último en escribir (last-writer-wins declarado).
 - **Revisiones append-only.** Cada update inserta la versión anterior en `note_revisions` **en la misma
-  transacción** (`src/db/notes.ts:290`): nunca queda un estado intermedio ni un historial huérfano.
+  transacción** (`src/db/notes.ts:495`): nunca queda un estado intermedio ni un historial huérfano.
 - **Borrado lógico.** `cortex_delete` marca `deleted_at` y exige `author` + `reason`; no hay `DELETE`
   físico, así que un borrado no rompe referencias ni revisiones.
 - **Deduplicación que avisa, no bloquea.** Antes de crear, el servidor responde `similar_exists` con las

@@ -1,7 +1,7 @@
 # servidor-mcp Specification
 
 ## Purpose
-El contrato del servidor central: siete tools MCP sobre HTTP streamable, vista web de solo
+El contrato del servidor central: ocho tools MCP sobre HTTP streamable, vista web de solo
 lectura, healthcheck y empaquetado Docker, en un solo proceso Bun/Elysia.
 
 ## Requirements
@@ -49,11 +49,7 @@ THEN el siguiente `GET /health` dentro de los 40 s siguientes responde 200, sin 
 
 ### Requirement: API REST de solo lectura
 
-El proceso SHALL exponer `GET /api/search` (parámetros q, app, kind, issue, tags, limit) y
-`GET /api/notes/:id` respondiendo JSON con los mismos resultados que `cortex_search` y
-`cortex_read`. Ningún método de escritura SHALL existir bajo `/api`. Razón: scripts, CI y
-debugging necesitan acceso sin cliente MCP; la escritura queda concentrada en `/mcp`, donde
-viven la validación, las revisiones y la deduplicación.
+El proceso SHALL exponer `GET /api/search` (parámetros q, app, include_general, kind, issue, tags, limit), `GET /api/apps` y `GET /api/notes/:id` respondiendo JSON con los mismos resultados que `cortex_search`, `cortex_apps` y `cortex_read`. Ningún método de escritura SHALL existir bajo `/api`. Razón: scripts, CI y debugging necesitan acceso sin cliente MCP; la escritura queda concentrada en `/mcp`, donde viven la validación, las revisiones y la deduplicación.
 
 #### Scenario: Búsqueda por curl coincide con la tool
 
@@ -83,29 +79,6 @@ WHEN se elimina el contenedor del server y se vuelve a levantar apuntando a la m
 `DATABASE_URL` y el mismo volumen de cache
 THEN la nota sigue existiendo y `/health` reporta `model_loaded` sin descarga nueva
 
-### Requirement: Siete tools MCP con prefijo cortex_ sobre HTTP streamable
-
-El servidor SHALL exponer bajo `/mcp` (transporte HTTP streamable del SDK oficial) exactamente
-estas tools: `cortex_search`, `cortex_read`, `cortex_write`, `cortex_update`, `cortex_list`,
-`cortex_history`, `cortex_delete`. Ninguna tool con prefijo `kb_` SHALL existir. Razón: un alias
-`kb_*` mostraría a los agentes dos nombres para la misma operación y rompería el contrato de
-exactamente siete.
-
-#### Scenario: tools/list devuelve exactamente siete
-
-GIVEN el servidor levantado
-WHEN un cliente MCP envía `tools/list`
-THEN la respuesta contiene exactamente las siete tools nombradas y ninguna otra, y ningún nombre
-empieza con `kb_`
-
-#### Scenario: Ciclo completo por MCP con borrado
-
-GIVEN un cliente MCP conectado
-WHEN ejecuta en orden cortex_write (con author), cortex_search del contenido, cortex_read del id,
-cortex_update con motivo, cortex_history y cortex_delete con author y motivo
-THEN cada llamada responde éxito, el historial previo al borrado contiene 1 revisión y la nota
-borrada ya no aparece en cortex_list
-
 ### Requirement: Las tools declaran su schema y responden errores descriptivos
 
 Cada tool SHALL declarar su schema de parámetros y responder errores descriptivos (qué parámetro
@@ -128,17 +101,13 @@ THEN su descripción nombra los cinco tipos válidos y explica el significado de
 
 ### Requirement: El servidor se identifica como Cortex
 
-El servidor SHALL identificarse como `cortex` en el `serverInfo.name` de la respuesta `initialize`
-MCP, con versión `0.2.0`; la vista web SHALL mostrar «Cortex» en el título de la página y en el
-encabezado del listado; y `package.json` SHALL llevar `name: "cortex"` y `version: "0.2.0"`.
-Razón: es el nombre que ven el equipo y los agentes en Hermes y en el navegador; mientras diga
-`novara-knowledge-mcp` o `Novara KB`, el producto no tiene identidad.
+El servidor SHALL identificarse como `cortex` en el `serverInfo.name` de la respuesta `initialize` MCP, con `serverInfo.version` igual al campo `version` de `package.json`; la vista web SHALL mostrar «Cortex» en el título de la página y en el encabezado del listado; y `package.json` SHALL llevar `name: "cortex"`.
 
 #### Scenario: El initialize nombra al servidor
 
 GIVEN el servidor levantado
 WHEN un cliente MCP envía `initialize`
-THEN `serverInfo.name` es `cortex` y `serverInfo.version` es `0.2.0`
+THEN `serverInfo.name` es `cortex` y `serverInfo.version` es igual al `version` de `package.json`
 
 #### Scenario: La vista web dice Cortex
 
@@ -428,7 +397,7 @@ THEN responde 404 con `error.code` igual a -32001 y `id` igual a null
 
 GIVEN la respuesta 404 del escenario anterior
 WHEN el cliente envía `initialize` sin `mcp-session-id`
-THEN responde 200 con un `mcp-session-id` nuevo y `tools/list` con ese id responde las siete tools
+THEN responde 200 con un `mcp-session-id` nuevo y `tools/list` con ese id responde las ocho tools
 
 ### Requirement: Cierre limpio ante SIGTERM y SIGINT
 
@@ -700,16 +669,12 @@ THEN la respuesta puede incluir la nota de `general`
 
 ### Requirement: Las respuestas JSON de las tools son compactas
 
-Toda respuesta exitosa de las siete tools que lleve JSON, incluida la de `similar_exists` de `cortex_write`,
-SHALL serializarse sin indentación ni saltos de línea entre elementos, de modo que su texto sea igual a
-`JSON.stringify(JSON.parse(texto))`. Razón: la indentación suma 23 % de caracteres (medido en
-`cortex_list`: 33.916 contra 26.112) sin dar nada al agente.
+Toda respuesta exitosa de las ocho tools que lleve JSON, incluida la de `similar_exists` de `cortex_write` y la de `cortex_apps`, SHALL serializarse sin indentación ni saltos de línea entre elementos, de modo que su texto sea igual a `JSON.stringify(JSON.parse(texto))`.
 
 #### Scenario: Ninguna tool indenta
 
 GIVEN el servidor levantado y notas existentes, entre ellas dos casi idénticas
-WHEN se ejecutan con éxito `cortex_search`, `cortex_read`, `cortex_write` (nota nueva), `cortex_write` que
-responde `similar_exists`, `cortex_update`, `cortex_list`, `cortex_history` y `cortex_delete`
+WHEN se ejecutan con éxito `cortex_search`, `cortex_read`, `cortex_write` (nota nueva), `cortex_write` que responde `similar_exists`, `cortex_update`, `cortex_list`, `cortex_apps`, `cortex_history` y `cortex_delete`
 THEN el texto de cada respuesta es igual a `JSON.stringify(JSON.parse(texto))`
 
 ### Requirement: Las respuestas de list e history tienen un tope de 20.000 caracteres
@@ -788,3 +753,35 @@ WHEN un cliente MCP envía `tools/list`
 THEN `cortex_list` declara `limit` y `offset` con tipo `integer`, `cortex_history` declara `limit` e `rev`
 con tipo `integer` e `include_body` con tipo `boolean`, y la descripción de `cortex_history` no contiene la
 cadena `completo`
+
+### Requirement: Ocho tools MCP con prefijo cortex_ sobre HTTP streamable
+
+El servidor SHALL exponer bajo `/mcp` (transporte HTTP streamable del SDK oficial) exactamente estas tools: `cortex_search`, `cortex_read`, `cortex_write`, `cortex_update`, `cortex_list`, `cortex_apps`, `cortex_history`, `cortex_delete`. Ninguna tool con prefijo `kb_` SHALL existir. Razón: un alias `kb_*` mostraría a los agentes dos nombres para la misma operación y rompería el contrato de exactamente ocho.
+
+#### Scenario: tools/list devuelve exactamente ocho
+
+GIVEN el servidor levantado
+WHEN un cliente MCP envía `tools/list`
+THEN la respuesta contiene exactamente las ocho tools nombradas y ninguna otra, y ningún nombre empieza con `kb_`
+
+#### Scenario: Ciclo completo por MCP con borrado
+
+GIVEN un cliente MCP conectado
+WHEN ejecuta en orden cortex_write (con author), cortex_search del contenido, cortex_read del id, cortex_update con motivo, cortex_history y cortex_delete con author y motivo
+THEN cada llamada responde éxito, el historial previo al borrado contiene 1 revisión y la nota borrada ya no aparece en cortex_list
+
+### Requirement: El compose reenvía las variables de configuración documentadas
+
+`docker-compose.yml` SHALL reenviar al servicio `server` cada variable que `.env.example` documenta como configurable, incluidas `CORTEX_STRICT_NOTES` y `MCP_SESSION_TTL_MINUTES`; esta última con defecto `1440`, porque una cadena vacía deja un aviso en el log en cada arranque. Razón: una variable que el `.env` documenta pero el compose no reenvía no tiene efecto en `docker compose up`.
+
+#### Scenario: Las variables llegan al contenedor
+
+GIVEN `CORTEX_STRICT_NOTES=1` y `MCP_SESSION_TTL_MINUTES=5` en el entorno del shell
+WHEN se ejecuta `docker compose -f docker-compose.yml config`
+THEN el `environment` del servicio `server` contiene `CORTEX_STRICT_NOTES: "1"` y `MCP_SESSION_TTL_MINUTES: "5"`
+
+#### Scenario: Sin la variable el TTL vale 1440 sin aviso
+
+GIVEN `MCP_SESSION_TTL_MINUTES` ausente del entorno
+WHEN se ejecuta `docker compose -f docker-compose.yml config`
+THEN el `environment` del servicio `server` contiene `MCP_SESSION_TTL_MINUTES: "1440"`

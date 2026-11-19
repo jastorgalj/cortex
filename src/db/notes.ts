@@ -220,7 +220,8 @@ function validateCreate(input: CreateInput): void {
     throw new ValidationError(
       'el contenido parece una bitácora (registro de actividad), no conocimiento reutilizable. ' +
         'Guardá la decisión, la regla o el pitfall que deja el trabajo; ' +
-        'o quitá CORTEX_STRICT_NOTES para permitir bitácoras con advertencia.',
+        'o quitá CORTEX_STRICT_NOTES para permitir bitácoras con advertencia. ' +
+        'force no evita este rechazo.',
       journalField(input.title, input.body_md),
     )
   }
@@ -563,7 +564,7 @@ async function buildListFilter(
 
   return {
     deleted_at: null,
-    ...(filter.app ? { app: { in: appFilterValues(filter.app, filter.include_general !== false) } } : {}),
+    ...(filter.app?.trim() ? { app: { in: appFilterValues(filter.app, filter.include_general !== false) } } : {}),
     ...(filter.kind ? { kind: filter.kind } : {}),
     ...(filter.author ? { author: filter.author } : {}),
     ...(issueIds !== null ? { id: { in: issueIds } } : {}),
@@ -731,7 +732,7 @@ export async function lexicalSearch(
   query: string,
   filter: { app?: string; include_general?: boolean; kind?: string } = {},
 ): Promise<LexicalResult[]> {
-  const appCond = filter.app
+  const appCond = filter.app?.trim()
     ? Prisma.sql`AND app IN (${Prisma.join(appFilterValues(filter.app, filter.include_general !== false))})`
     : Prisma.empty
   const kindCond = filter.kind ? Prisma.sql`AND kind = ${filter.kind}` : Prisma.empty
