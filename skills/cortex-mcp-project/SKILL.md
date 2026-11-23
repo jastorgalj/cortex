@@ -150,6 +150,13 @@ Prisma pierde `vector`, el HNSW, el índice parcial y el trigger FTS.
 Smoke contra la base real: `GET /health` (`model_loaded: true`), `GET /` (200), MCP
 `initialize` + `tools/list` (8 tools `cortex_*`). Las tools aceptan tanto `q` como `query` (alias desde #21).
 
+**Tres tests rojos son preexistentes, no regresiones.** `test/health.test.ts` (×2) y `test/shutdown.test.ts` (×1)
+fallan en cualquier checkout, incluido un worktree limpio de `main` sin cambios, y el `/health` real responde 200
+con `countNotes` inyectado. Son artefactos del arnés: `PROBE_PORT` fijo (13194) y `app.stop()` que no libera el
+puerto antes del `listen` siguiente, así que el `fetch` llega al server del test anterior (con otro `countNotes`)
+y el sondeo real cuelga hasta el timeout de 3 s. Antes de culpar a un cambio, corré el baseline; no los tapes
+alargando el timeout del producto.
+
 ## Distribución: imagen publicada y skill sin clonar
 
 - **Publicación**: `.github/workflows/publish.yml` corre en tag `v*` con `GITHUB_TOKEN`
