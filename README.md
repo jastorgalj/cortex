@@ -225,6 +225,11 @@ log del servidor, nunca en el cuerpo) y el contenedor pasa a `unhealthy`. Qué s
    Los reintentos de las tools no aplican a `/health`: este endpoint nunca reintenta, contesta de
    inmediato. `MCP_SESSION_TTL_MINUTES` (opcional, 1440 por defecto) controla cuánto dura una sesión
    MCP inactiva antes de que el barrido la cierre.
+5. **`db_pool: "idle"` en `/health`.** Si no hubo actividad durante `DB_IDLE_DISCONNECT_MINUTES` minutos
+   (defecto 4), el servidor cierra el pool y `/health` responde `200` con `db_pool: "idle"` sin consultar
+   la base. El healthcheck de Docker (`status: "ok"`) sigue pasando, pero si la base cae durante ese
+   período la condición degradada no se detecta hasta la siguiente request real. `DB_IDLE_DISCONNECT_MINUTES=0`
+   desactiva esta función (pool siempre abierto).
 
 ## Licencia
 

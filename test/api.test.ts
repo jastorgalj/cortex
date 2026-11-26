@@ -74,6 +74,7 @@ describe('GET /health', () => {
     const body = await r.json() as {
       status: string
       notes: number
+      db_pool: string
       model_loaded: boolean
       sessions: number
       uptime_s: number
@@ -85,6 +86,7 @@ describe('GET /health', () => {
     expect(body.model_loaded).toBe(true)
     expect(typeof body.sessions).toBe('number')
     expect(typeof body.uptime_s).toBe('number')
+    expect(body.db_pool).toBe('active')
   })
 })
 
