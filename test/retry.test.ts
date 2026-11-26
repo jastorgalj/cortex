@@ -247,6 +247,103 @@ describe('retryingClient — delegados lectura/escritura (Proxy)', () => {
   })
 })
 
+// ─── onActivity (task 2.3) ───────────────────────────────────────────────────
+
+describe('withDbRetry — onActivity', () => {
+  test('operación que acierta al primer intento → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const fn = mock(async () => 'ok')
+
+    await withDbRetry(fn, { idempotent: true, sleep: noopSleep, onActivity })
+
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('falla P1001 tres veces y acierta → onActivity 2 veces (no 5)', async () => {
+    const onActivity = mock(() => {})
+    let calls = 0
+    const fn = mock(async () => {
+      calls++
+      if (calls <= 3) throw makeKnown('P1001')
+      return 'ok'
+    })
+
+    await withDbRetry(fn, { idempotent: true, sleep: noopSleep, onActivity })
+
+    expect(fn).toHaveBeenCalledTimes(4)
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('termina con DbUnavailableError → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const fn = mock(async () => { throw makeKnown('P1001') })
+
+    await expect(
+      withDbRetry(fn, { idempotent: true, sleep: noopSleep, onActivity }),
+    ).rejects.toBeInstanceOf(DbUnavailableError)
+
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('termina con error de negocio → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const bizErr = new Error('error de negocio')
+    const fn = mock(async () => { throw bizErr })
+
+    await expect(
+      withDbRetry(fn, { idempotent: true, sleep: noopSleep, onActivity }),
+    ).rejects.toBe(bizErr)
+
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('retryingClient — onActivity via proxy (task 2.3)', () => {
+  function makeWrapped(onActivity: () => void) {
+    const fakeNote = { findMany: mock(async () => []) }
+    const fakeClient = {
+      note: fakeNote,
+      $transaction: mock(async () => 42),
+      $queryRaw: mock(async () => [{ n: 1n }]),
+      $disconnect: mock(() => Promise.resolve()),
+      $connect: mock(() => Promise.resolve()),
+    }
+    const wrapped = retryingClient(fakeClient as unknown as PrismaClient, {
+      sleep: noopSleep,
+      onActivity,
+    })
+    return { wrapped, fakeClient }
+  }
+
+  test('note.findMany → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const { wrapped } = makeWrapped(onActivity)
+    await (wrapped as any).note.findMany()
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('$queryRaw → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const { wrapped } = makeWrapped(onActivity)
+    await (wrapped as any).$queryRaw`SELECT 1`
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('$transaction → onActivity 2 veces', async () => {
+    const onActivity = mock(() => {})
+    const { wrapped } = makeWrapped(onActivity)
+    await (wrapped as any).$transaction(async () => {})
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
+  test('$disconnect → onActivity 0 veces (SKIP_METHODS)', async () => {
+    const onActivity = mock(() => {})
+    const { wrapped } = makeWrapped(onActivity)
+    await (wrapped as any).$disconnect()
+    expect(onActivity).toHaveBeenCalledTimes(0)
+  })
+})
+
 describe('retryingClient — integración con BD de test (5442)', () => {
   test('$queryRaw, note.count() y $transaction devuelven los mismos valores que el cliente sin envolver', async () => {
     const raw = new PrismaClient()

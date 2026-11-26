@@ -24,6 +24,9 @@ se guarda el modelo ONNX; por defecto `~/.model-cache/knowledge-mcp`) y `CORTEX_
 El primer arranque descarga y carga el modelo (puede tardar unos minutos) y `GET /health` reporta `model_loaded`.
 `MCP_SESSION_TTL_MINUTES` (opcional, defecto 1440) fija cuántos minutos de inactividad aguanta una
 sesión MCP antes de que el barrido la cierre.
+`DB_IDLE_DISCONNECT_MINUTES` (opcional, defecto 4; `0` desactiva) fija cuántos minutos de inactividad
+sin consultas cierran el pool de Prisma para que Neon suspenda el compute. La primera request tras
+la inactividad tarda más porque la base despierta y el pool reconecta.
 `CORTEX_STRICT_NOTES` (opcional; `1` activa el modo estricto: las bitácoras se rechazan en lugar de
 advertir; `force` no anula este rechazo).
 `CORTEX_APPS` (opcional; lista separada por comas de apps válidas).

@@ -47,4 +47,9 @@ describe('docker-compose.yml: variables de entorno del servicio server', () => {
     expect(env).toHaveProperty('MCP_SESSION_TTL_MINUTES')
     expect(env['MCP_SESSION_TTL_MINUTES']).toBe('${MCP_SESSION_TTL_MINUTES:-1440}')
   })
+
+  test('contiene DB_IDLE_DISCONNECT_MINUTES con defecto 4', () => {
+    expect(env).toHaveProperty('DB_IDLE_DISCONNECT_MINUTES')
+    expect(env['DB_IDLE_DISCONNECT_MINUTES']).toBe('${DB_IDLE_DISCONNECT_MINUTES:-4}')
+  })
 })

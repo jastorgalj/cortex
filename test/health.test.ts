@@ -164,3 +164,81 @@ describe('createHealthProbe — sondeo con reloj inyectado', () => {
     expect(calls).toBe(2)
   })
 })
+
+// ─── isPoolIdle (task 3.4) ───────────────────────────────────────────────────
+
+const IDLE_PORT = 13195
+const IDLE_URL = `http://localhost:${IDLE_PORT}`
+
+describe('GET /health — isPoolIdle: true (pool idle)', () => {
+  test('3 GET /health → 3 × 200 con db_pool:idle, sin notes, countNotes 0 llamadas', async () => {
+    let countNotesCalls = 0
+    const countNotes = async (): Promise<number> => { countNotesCalls++; return 0 }
+    const app = createApp({ countNotes, isPoolIdle: () => true })
+    app.listen(IDLE_PORT)
+    try {
+      for (let i = 0; i < 3; i++) {
+        const r = await fetch(`${IDLE_URL}/health`)
+        expect(r.status).toBe(200)
+        const body = (await r.json()) as Record<string, unknown>
+        expect(body.status).toBe('ok')
+        expect(body.db_pool).toBe('idle')
+        expect(body.notes).toBeUndefined()
+      }
+      expect(countNotesCalls).toBe(0)
+    } finally {
+      app.stop()
+    }
+  })
+})
+
+describe('GET /health — isPoolIdle: false (pool active)', () => {
+  test('GET /health → 200 con db_pool:active y notes, countNotes 1 llamada', async () => {
+    let countNotesCalls = 0
+    const countNotes = async (): Promise<number> => { countNotesCalls++; return 5 }
+    const app = createApp({ countNotes, isPoolIdle: () => false })
+    app.listen(IDLE_PORT)
+    try {
+      const r = await fetch(`${IDLE_URL}/health`)
+      expect(r.status).toBe(200)
+      const body = (await r.json()) as Record<string, unknown>
+      expect(body.status).toBe('ok')
+      expect(body.db_pool).toBe('active')
+      expect(body.notes).toBe(5)
+      expect(countNotesCalls).toBe(1)
+    } finally {
+      app.stop()
+    }
+  })
+})
+
+describe('GET /health — cambio de isPoolIdle entre requests', () => {
+  test('true → false: segunda request consulta la BD', async () => {
+    let idle = true
+    let countNotesCalls = 0
+    const countNotes = async (): Promise<number> => { countNotesCalls++; return 7 }
+    const app = createApp({ countNotes, isPoolIdle: () => idle })
+    app.listen(IDLE_PORT)
+    try {
+      // Primera: idle=true → db_pool:idle, sin consultar BD
+      const r1 = await fetch(`${IDLE_URL}/health`)
+      expect(r1.status).toBe(200)
+      const b1 = (await r1.json()) as Record<string, unknown>
+      expect(b1.db_pool).toBe('idle')
+      expect(countNotesCalls).toBe(0)
+
+      // Cambiar a active
+      idle = false
+
+      // Segunda: idle=false → db_pool:active, BD consultada
+      const r2 = await fetch(`${IDLE_URL}/health`)
+      expect(r2.status).toBe(200)
+      const b2 = (await r2.json()) as Record<string, unknown>
+      expect(b2.db_pool).toBe('active')
+      expect(b2.notes).toBe(7)
+      expect(countNotesCalls).toBe(1)
+    } finally {
+      app.stop()
+    }
+  })
+})

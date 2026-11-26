@@ -2,7 +2,7 @@
  * src/index.ts — Servidor Elysia.
  */
 import { Elysia, t } from 'elysia'
-import { prisma, rawPrisma } from './db/client.ts'
+import { prisma, rawPrisma, idleDisconnect, closeDb } from './db/client.ts'
 import { listNotes, readNote, countNotesByApp, NotFoundError } from './db/notes.ts'
 import { hybridSearch } from './db/search.ts'
 import { getAppConfig, GENERAL_APP } from './db/apps.ts'
@@ -19,15 +19,28 @@ export const PORT = Number(process.env.PORT ?? 3091)
 export interface AppOptions {
   /** Función que cuenta notas; default: rawPrisma.note.count sin reintentos. */
   countNotes?: () => Promise<number>
+  /** Función que indica si el pool está inactivo; default: idleDisconnect.isIdle(). */
+  isPoolIdle?: () => boolean
 }
 
 export function createApp(opts: AppOptions = {}): Elysia {
   const countNotes = opts.countNotes ?? (() => rawPrisma.note.count({ where: { deleted_at: null } }))
+  const isPoolIdle = opts.isPoolIdle ?? (() => idleDisconnect.isIdle())
   const probe = createHealthProbe({ countNotes })
 
   const app = new Elysia()
 
   app.get('/health', async ({ set }) => {
+    if (isPoolIdle()) {
+      return {
+        status: 'ok',
+        db_pool: 'idle',
+        model_loaded: isModelLoaded(),
+        sessions: getActiveSessions(),
+        uptime_s: Math.floor(process.uptime()),
+      }
+    }
+
     const result = await probe()
     const sessions = getActiveSessions()
     const uptime_s = Math.floor(process.uptime())
@@ -36,6 +49,7 @@ export function createApp(opts: AppOptions = {}): Elysia {
       return {
         status: 'ok',
         notes: result.notes,
+        db_pool: 'active',
         model_loaded: isModelLoaded(),
         sessions,
         uptime_s,
@@ -181,7 +195,7 @@ if (import.meta.main) {
     stopServer: async () => {
       await app.stop()
     },
-    disconnect: () => rawPrisma.$disconnect(),
+    disconnect: closeDb,
   })
 
   process.on('SIGTERM', () => shutdown('SIGTERM'))

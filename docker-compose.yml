@@ -30,6 +30,7 @@ services:
       CORTEX_APP_MODE: ${CORTEX_APP_MODE:-}
       CORTEX_STRICT_NOTES: ${CORTEX_STRICT_NOTES:-}
       MCP_SESSION_TTL_MINUTES: ${MCP_SESSION_TTL_MINUTES:-1440}
+      DB_IDLE_DISCONNECT_MINUTES: ${DB_IDLE_DISCONNECT_MINUTES:-4}
     volumes:
       - model-cache:/app/.model-cache
     depends_on:
