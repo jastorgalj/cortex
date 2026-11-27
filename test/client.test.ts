@@ -7,7 +7,7 @@
  * G2b: createApp() sin isPoolIdle usa idleDisconnect.isIdle() del singleton.
  */
 import { describe, test, expect, spyOn } from 'bun:test'
-import { PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 import { createDb, idleDisconnect } from '../src/db/client.ts'
 import { createApp } from '../src/index.ts'
 
@@ -100,24 +100,64 @@ const G2B_URL = `http://localhost:${G2B_PORT}`
 
 describe('createApp — isPoolIdle default usa idleDisconnect.isIdle()', () => {
   test(
-    'sin isPoolIdle: spy isIdle=true → /health db_pool:idle sin invocar countNotes',
+    'sin isPoolIdle: spy isIdle=true → /health db_pool:idle',
     async () => {
       const isIdleSpy = spyOn(idleDisconnect, 'isIdle').mockReturnValue(true)
-      let countNotesCalls = 0
-      const countNotes = async (): Promise<number> => { countNotesCalls++; return 0 }
 
-      const app = createApp({ countNotes }) // sin isPoolIdle → usa default
+      const app = createApp() // sin isPoolIdle → usa default
       app.listen(G2B_PORT)
       try {
         const r = await fetch(`${G2B_URL}/health`)
         expect(r.status).toBe(200)
         const body = (await r.json()) as Record<string, unknown>
         expect(body.db_pool).toBe('idle')
-        expect(countNotesCalls).toBe(0)
+        // El health nunca devuelve notes (no sondea la BD)
+        expect(body.notes).toBeUndefined()
       } finally {
         app.stop()
         isIdleSpy.mockRestore()
       }
     },
   )
+})
+
+// ─── G3 — reconnect cableado en createDb → retryingClient ────────────────────
+//
+// Verifica que `createDb` pasa `reconnect: () => raw.$connect()` al
+// retryingClient. Si se elimina esa línea de client.ts, raw.$connect no se
+// llama y la aserción connectCalls===1 falla (ROJO demostrado).
+
+describe('createDb — reconnect cableado en retryingClient', () => {
+  test('P1001 en primer intento → raw.$connect llamado 1 vez, query exitosa al reintentar', async () => {
+    const { setTimer, clearTimer } = makeFakeTimers()
+    let connectCalls = 0
+    let countCalls = 0
+
+    const fakeRaw = {
+      $disconnect: () => Promise.resolve(),
+      $connect: () => { connectCalls++; return Promise.resolve() },
+      note: {
+        count: (_args?: unknown) => {
+          countCalls++
+          if (countCalls === 1) {
+            return Promise.reject(
+              new Prisma.PrismaClientKnownRequestError('error simulado P1001', {
+                code: 'P1001',
+                clientVersion: '6.0.0',
+              }),
+            )
+          }
+          return Promise.resolve(42)
+        },
+      },
+    } as unknown as PrismaClient
+
+    const { prisma: p } = createDb({ raw: fakeRaw, minutes: 4, setTimer, clearTimer })
+
+    const result = await p.note.count({ where: { deleted_at: null } })
+
+    expect(result).toBe(42)        // la query fue reintentada con éxito
+    expect(connectCalls).toBe(1)  // reconnect llamado exactamente 1 vez (primer reintento)
+    expect(countCalls).toBe(2)    // 1 fallo P1001 + 1 éxito
+  })
 })

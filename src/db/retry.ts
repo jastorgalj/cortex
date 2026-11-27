@@ -60,6 +60,8 @@ export interface RetryOptions {
   now?: () => number
   /** Callback de actividad; llamado una vez al empezar y una vez al terminar (finally). */
   onActivity?: () => void
+  /** Reconexión explícita; llamada antes del primer reintento tras error de conexión. */
+  reconnect?: () => Promise<void>
 }
 
 /** Esperas entre intentos: 200 / 500 / 1000 ms. */
@@ -74,7 +76,7 @@ const DELAYS = [200, 500, 1000] as const
  */
 export async function withDbRetry<T>(
   fn: () => Promise<T>,
-  { idempotent, sleep = defaultSleep, now = Date.now, onActivity }: RetryOptions,
+  { idempotent, sleep = defaultSleep, now = Date.now, onActivity, reconnect }: RetryOptions,
 ): Promise<T> {
   onActivity?.()
   try {
@@ -95,6 +97,11 @@ export async function withDbRetry<T>(
         if (attempt >= DELAYS.length || now() - start >= 8000) {
           console.error('[cortex] withDbRetry: agotados los reintentos:', err)
           throw new DbUnavailableError(err)
+        }
+
+        // Reconexión explícita en el primer reintento (cubre idle-disconnect)
+        if (reconnect && attempt === 0) {
+          try { await reconnect() } catch { /* el retry siguiente detectará si sigue caído */ }
         }
 
         await sleep(DELAYS[attempt]!)
@@ -135,7 +142,7 @@ const IDEMPOTENT_DELEGATE = new Set([
 
 function createDelegateProxy(
   delegate: object,
-  options: Pick<RetryOptions, 'sleep' | 'now' | 'onActivity'>,
+  options: Pick<RetryOptions, 'sleep' | 'now' | 'onActivity' | 'reconnect'>,
 ): object {
   return new Proxy(delegate, {
     get(target, prop) {
@@ -158,7 +165,7 @@ function createDelegateProxy(
  */
 export function retryingClient(
   client: PrismaClient,
-  options: Pick<RetryOptions, 'sleep' | 'now' | 'onActivity'> = {},
+  options: Pick<RetryOptions, 'sleep' | 'now' | 'onActivity' | 'reconnect'> = {},
 ): PrismaClient {
   // Caché de proxies de delegados para mantener identidad de referencia
   const delegateCache = new Map<string, object>()
