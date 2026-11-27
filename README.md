@@ -124,12 +124,12 @@ Verificación:
 
 ```bash
 curl http://localhost:3091/health
-# -> {"status":"ok","notes":0,"model_loaded":true,"sessions":0,"uptime_s":0}
+# -> {"status":"ok","db_pool":"active","model_loaded":true,"sessions":0,"uptime_s":0}
 ```
 
-`status: ok` es el servidor funcionando, `notes: 0` es lo esperado en una base recién migrada y
-`model_loaded: true` confirma el modelo de embeddings cargado. El contenedor aplica las migraciones
-pendientes al arrancar, así que el `docker run` queda autosuficiente.
+`status: ok` es el servidor funcionando, `db_pool: "active"` confirma que el pool de conexiones está
+listo y `model_loaded: true` confirma el modelo de embeddings cargado. El contenedor aplica las
+migraciones pendientes al arrancar, así que el `docker run` queda autosuficiente.
 
 Si la base es administrada (Neon, RDS), agregá `?sslmode=require` a la URL: esos proveedores exigen TLS.
 

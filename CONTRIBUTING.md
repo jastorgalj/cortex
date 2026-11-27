@@ -59,7 +59,7 @@ El compose del repo levanta el servidor con su propio Postgres, sin escribir el 
 git clone https://github.com/jastorgalj/cortex.git cortex && cd cortex
 docker compose up --build -d
 curl http://localhost:3091/health
-# -> {"status":"ok","notes":0,"model_loaded":true,"sessions":0,"uptime_s":0}
+# -> {"status":"ok","db_pool":"active","model_loaded":true,"sessions":0,"uptime_s":0}
 ```
 
 El `.env` es opcional: sin él, el servicio `server` apunta al `db` del compose. Para usar otra base, poné
@@ -115,7 +115,7 @@ que dos escrituras simultáneas no se pisen:
   `rawPrisma` que reintenta con `withDbRetry`): lecturas y escrituras reintentan cuando la consulta no
   llegó a ejecutarse (sin conexión, pool agotado); P1017 (conexión cortada) solo en lecturas, para no
   duplicar escrituras. Presupuesto 200/500/1000 ms con tope de 8 s. Agotado, lanzan `DbUnavailableError`
-  con mensaje fijo. `/health` usa `rawPrisma` y **no** reintenta: contesta rápido con su propio timeout.
+  con mensaje fijo. `/health` **no consulta la BD**: refleja el estado del pool HTTP sin ningún sondeo ni timeout propio de base de datos.
 
 ## Configuración de la base
 
