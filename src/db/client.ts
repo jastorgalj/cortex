@@ -34,7 +34,7 @@ export function createDb({
     setTimer: setTimer ?? setTimeout,
     clearTimer: clearTimer ?? clearTimeout,
   })
-  const prisma = retryingClient(raw, { onActivity: idle.touch }) as PrismaClient
+  const prisma = retryingClient(raw, { onActivity: idle.touch, reconnect: () => raw.$connect() }) as PrismaClient
   const closeDb = (): Promise<void> => {
     idle.dispose()
     return raw.$disconnect()

@@ -75,13 +75,16 @@ export function createIdleDisconnect({
   async function onTimer(): Promise<void> {
     timer = null
     const gen = generation
+    // Marcar idle ANTES del disconnect: evita que el health-check sondee
+    // un pool que ya se está cerrando (race condition).
+    idle = true
     try {
       await disconnect()
-      // Solo marcar idle si la generación no cambió durante el disconnect
-      if (generation === gen) {
-        idle = true
-      }
     } catch (err) {
+      // Falló el disconnect: restaurar idle solo si no hubo touch() concurrente
+      if (generation === gen) {
+        idle = false
+      }
       log(err)
       // No marcar idle; reprogramar el plazo completo
       schedule()

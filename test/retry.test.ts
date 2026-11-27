@@ -344,6 +344,62 @@ describe('retryingClient — onActivity via proxy (task 2.3)', () => {
   })
 })
 
+// ─── withDbRetry — reconnect ──────────────────────────────────────────────────
+
+describe('withDbRetry — reconnect', () => {
+  test('P1001 en primer intento → reconnect llamado 1 vez antes del sleep', async () => {
+    const reconnect = mock(() => Promise.resolve())
+    let calls = 0
+    const fn = mock(async () => {
+      calls++
+      if (calls === 1) throw makeKnown('P1001')
+      return 'ok'
+    })
+
+    const result = await withDbRetry(fn, { idempotent: true, sleep: noopSleep, reconnect })
+    expect(result).toBe('ok')
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(reconnect).toHaveBeenCalledTimes(1)
+  })
+
+  test('sin error → reconnect nunca llamado', async () => {
+    const reconnect = mock(() => Promise.resolve())
+    const fn = mock(async () => 'ok')
+
+    await withDbRetry(fn, { idempotent: true, sleep: noopSleep, reconnect })
+    expect(reconnect).toHaveBeenCalledTimes(0)
+  })
+
+  test('P1001 × 3 intentos → reconnect llamado solo en el primero', async () => {
+    const reconnect = mock(() => Promise.resolve())
+    let calls = 0
+    const fn = mock(async () => {
+      calls++
+      if (calls <= 3) throw makeKnown('P1001')
+      return 'ok'
+    })
+
+    await withDbRetry(fn, { idempotent: true, sleep: noopSleep, reconnect })
+    expect(fn).toHaveBeenCalledTimes(4)
+    expect(reconnect).toHaveBeenCalledTimes(1) // solo en attempt===0
+  })
+
+  test('reconnect que rechaza no impide el reintento', async () => {
+    const reconnect = mock(() => Promise.reject(new Error('connect failed')))
+    let calls = 0
+    const fn = mock(async () => {
+      calls++
+      if (calls === 1) throw makeKnown('P1001')
+      return 'ok'
+    })
+
+    const result = await withDbRetry(fn, { idempotent: true, sleep: noopSleep, reconnect })
+    expect(result).toBe('ok')
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(reconnect).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('retryingClient — integración con BD de test (5442)', () => {
   test('$queryRaw, note.count() y $transaction devuelven los mismos valores que el cliente sin envolver', async () => {
     const raw = new PrismaClient()

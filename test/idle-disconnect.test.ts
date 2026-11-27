@@ -166,6 +166,44 @@ describe('createIdleDisconnect — touch() durante disconnect pendiente', () => 
 
     expect(idle.isIdle()).toBe(false)
   })
+
+  test('isIdle() es true inmediatamente al disparar el timer (antes de que disconnect resuelva)', async () => {
+    // Verifica la fix del race condition: idle=true se marca ANTES del await disconnect()
+    // Con la implementación antigua (idle=true solo en éxito del disconnect) este test FALLA.
+    let resolveDisconnect!: () => void
+    const disconnect = mock(() => new Promise<void>((r) => { resolveDisconnect = r }))
+    const { setTimer, clearTimer } = makeFakeTimers()
+
+    const entries: Array<{ cb: () => void; ms: number }> = []
+    const fakeSetTimer = (cb: () => void, ms: number) => {
+      const handle = { _unrefed: false, unref() { this._unrefed = true } }
+      entries.push({ cb, ms })
+      return handle
+    }
+
+    const idle = createIdleDisconnect({
+      disconnect,
+      minutes: 4,
+      setTimer: fakeSetTimer,
+      clearTimer,
+    })
+
+    // Disparar el timer sincrónicamente: ejecutar la cb sin await para observar
+    // el estado justo después de la primera línea de onTimer (idle = true)
+    const entry = entries.shift()!
+    const timerPromise = (async () => { await entry.cb() })()
+
+    // En este punto: onTimer se ejecutó hasta `await disconnect()`.
+    // Con la fix: idle ya es true (se marcó antes del await).
+    expect(idle.isIdle()).toBe(true)
+
+    // Resolver el disconnect y esperar a que termine
+    resolveDisconnect()
+    await timerPromise
+
+    // Después del éxito: idle sigue true
+    expect(idle.isIdle()).toBe(true)
+  })
 })
 
 describe('createIdleDisconnect — minutes: 0', () => {

@@ -124,12 +124,12 @@ Verificación:
 
 ```bash
 curl http://localhost:3091/health
-# -> {"status":"ok","notes":0,"model_loaded":true,"sessions":0,"uptime_s":0}
+# -> {"status":"ok","db_pool":"active","model_loaded":true,"sessions":0,"uptime_s":0}
 ```
 
-`status: ok` es el servidor funcionando, `notes: 0` es lo esperado en una base recién migrada y
-`model_loaded: true` confirma el modelo de embeddings cargado. El contenedor aplica las migraciones
-pendientes al arrancar, así que el `docker run` queda autosuficiente.
+`status: ok` es el servidor funcionando, `db_pool: "active"` confirma que el pool de conexiones está
+listo y `model_loaded: true` confirma el modelo de embeddings cargado. El contenedor aplica las
+migraciones pendientes al arrancar, así que el `docker run` queda autosuficiente.
 
 Si la base es administrada (Neon, RDS), agregá `?sslmode=require` a la URL: esos proveedores exigen TLS.
 
@@ -205,31 +205,24 @@ curl http://localhost:3091/health
 POST/PUT/PATCH/DELETE en `/api` responde 405, así que la validación, la deduplicación y el historial
 de revisiones no se pueden saltar.
 
-## Si el contenedor aparece `unhealthy`
+## Estado de la conexión a la BD: `db_pool` en `/health`
 
 El healthcheck de Compose (`docker-compose.yml`) y del `Dockerfile` pide `200` con `status: "ok"` en
-`GET /health`. Cuando la base de datos no responde, el servidor responde **503** con
-`{"status":"degraded","db":"down","error":"base de datos no disponible"}` (el mensaje real queda en el
-log del servidor, nunca en el cuerpo) y el contenedor pasa a `unhealthy`. Qué significa y qué hacer:
+`GET /health`. El endpoint **siempre responde 200** mientras el proceso HTTP esté vivo, sin consultar
+la base de datos. El campo `db_pool` informa el estado del pool interno:
 
-1. **`unhealthy` no reinicia nada.** `restart: always` o `unless-stopped` solo relanzan el proceso si
-   muere; un contenedor `unhealthy` sigue corriendo. No hace falta reiniciarlo para que se recupere.
-2. **La causa más común es la base**, no el servidor: Postgres caído, una pausa de red o el pool de
-   conexiones agotado. Revisá `docker logs <contenedor>`: el `[cortex] health probe error` dice el
-   motivo real.
-3. **Cuando la base vuelve, el servidor se recupera solo** (Prisma reabre las conexiones) y `/health`
-   vuelve a `200` en menos de un minuto, sin reiniciar el contenedor. Si no vuelve, ahí sí `docker
-   restart`.
-4. **`/health` tiene timeout propio (3 s) y un solo sondeo compartido.** Con la base colgada responde
-   `503` rápido en vez de quedarse esperando, y decenas de requests simultáneas no agotan el pool.
-   Los reintentos de las tools no aplican a `/health`: este endpoint nunca reintenta, contesta de
-   inmediato. `MCP_SESSION_TTL_MINUTES` (opcional, 1440 por defecto) controla cuánto dura una sesión
-   MCP inactiva antes de que el barrido la cierre.
-5. **`db_pool: "idle"` en `/health`.** Si no hubo actividad durante `DB_IDLE_DISCONNECT_MINUTES` minutos
-   (defecto 4), el servidor cierra el pool y `/health` responde `200` con `db_pool: "idle"` sin consultar
-   la base. El healthcheck de Docker (`status: "ok"`) sigue pasando, pero si la base cae durante ese
-   período la condición degradada no se detecta hasta la siguiente request real. `DB_IDLE_DISCONNECT_MINUTES=0`
-   desactiva esta función (pool siempre abierto).
+- **`"active"`**: el pool está abierto; la siguiente operación se ejecuta directamente.
+- **`"idle"`**: el pool fue cerrado tras `DB_IDLE_DISCONNECT_MINUTES` minutos (defecto: 4) sin actividad
+  de BD; la primera operación real reconecta automáticamente y los reintentos existentes cubren
+  el despertar de Neon.
+
+Un contenedor pasa a `unhealthy` **solo si el proceso HTTP deja de responder**. Si la base de datos
+cae, `/health` sigue devolviendo `200`; el problema se detecta en la primera request real (tool MCP,
+`/api/*` o vista web). `docker restart` solo hace falta si el proceso se colgó: las desconexiones de
+BD se recuperan solas. Un reinicio del servidor **invalida las sesiones MCP** y exige reinicializar el
+cliente. `MCP_SESSION_TTL_MINUTES` (opcional, 1440 por defecto) controla cuánto dura una sesión MCP
+inactiva antes de que el barrido la cierre. `DB_IDLE_DISCONNECT_MINUTES=0` desactiva la desconexión
+por inactividad (pool siempre abierto).
 
 ## Licencia
 

@@ -107,12 +107,13 @@ const SHUTDOWN_URL = `http://localhost:${SHUTDOWN_PORT}`
 describe('createShutdown — integración con la app real (D4)', () => {
   test('una request lenta en curso termina 200 tras el cierre; fetch nuevo es rechazado', async () => {
     let releaseSlow: (() => void) | null = null
-    const countNotes = (): Promise<number> =>
-      new Promise<number>((resolve) => {
-        releaseSlow = () => resolve(99)
-      })
 
-    const app = createApp({ countNotes })
+    const app = createApp()
+    // Ruta lenta inyectada: simula una operación que tarda en responder
+    app.get('/test-slow', async () => {
+      await new Promise<void>((resolve) => { releaseSlow = resolve })
+      return { status: 'ok' }
+    })
     app.listen(SHUTDOWN_PORT)
 
     const exit = mock((_code: number) => {})
@@ -125,8 +126,8 @@ describe('createShutdown — integración con la app real (D4)', () => {
       graceMs: 8000,
     })
 
-    // Lanza la request lenta (queda pendiente en countNotes)
-    const slowPromise = fetch(`${SHUTDOWN_URL}/health`)
+    // Lanza la request lenta (queda pendiente en la ruta /test-slow)
+    const slowPromise = fetch(`${SHUTDOWN_URL}/test-slow`)
 
     // Espera un instante para que la request llegue al handler
     await new Promise((r) => setTimeout(r, 100))
@@ -142,16 +143,15 @@ describe('createShutdown — integración con la app real (D4)', () => {
     // La request lenta debe terminar con 200 (hipótesis D4 verificada)
     const slowResponse = await slowPromise
     expect(slowResponse.status).toBe(200)
-    const body = (await slowResponse.json()) as { status: string; notes: number }
+    const body = (await slowResponse.json()) as { status: string }
     expect(body.status).toBe('ok')
-    expect(body.notes).toBe(99)
 
     await shutdownPromise
 
     // Un fetch nuevo posterior es rechazado (el servidor ya no escucha)
     let failed = false
     try {
-      await fetch(`${SHUTDOWN_URL}/health`)
+      await fetch(`${SHUTDOWN_URL}/test-slow`)
     } catch {
       failed = true
     }

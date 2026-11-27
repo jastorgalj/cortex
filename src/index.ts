@@ -2,14 +2,14 @@
  * src/index.ts — Servidor Elysia.
  */
 import { Elysia, t } from 'elysia'
-import { prisma, rawPrisma, idleDisconnect, closeDb } from './db/client.ts'
+import { PrismaClient } from '@prisma/client'
+import { prisma, idleDisconnect, closeDb } from './db/client.ts'
 import { listNotes, readNote, countNotesByApp, NotFoundError } from './db/notes.ts'
 import { hybridSearch } from './db/search.ts'
 import { getAppConfig, GENERAL_APP } from './db/apps.ts'
 import { isModelLoaded, warmup } from './db/embeddings.ts'
 import { handleMcpRequest, getActiveSessions, closeAllSessions, sweepIdleSessions } from './tools/mcp-server.ts'
 import { renderNoteList, renderNote } from './web/views.ts'
-import { createHealthProbe } from './health.ts'
 import { parseSessionTtlMinutes } from './tools/sessions.ts'
 import { createShutdown } from './shutdown.ts'
 import { duplicateThreshold } from './db/constants.ts'
@@ -17,57 +17,32 @@ import { duplicateThreshold } from './db/constants.ts'
 export const PORT = Number(process.env.PORT ?? 3091)
 
 export interface AppOptions {
-  /** Función que cuenta notas; default: rawPrisma.note.count sin reintentos. */
-  countNotes?: () => Promise<number>
   /** Función que indica si el pool está inactivo; default: idleDisconnect.isIdle(). */
   isPoolIdle?: () => boolean
+  /**
+   * Cliente Prisma alternativo; inyectado en tests para verificar que /health
+   * no toca la BD (ej. un Proxy que lanza si se accede). No usar en producción.
+   */
+  _prismaForTest?: PrismaClient
 }
 
 export function createApp(opts: AppOptions = {}): Elysia {
-  const countNotes = opts.countNotes ?? (() => rawPrisma.note.count({ where: { deleted_at: null } }))
   const isPoolIdle = opts.isPoolIdle ?? (() => idleDisconnect.isIdle())
-  const probe = createHealthProbe({ countNotes })
+  const db = opts._prismaForTest ?? prisma
 
   const app = new Elysia()
 
-  app.get('/health', async ({ set }) => {
-    if (isPoolIdle()) {
-      return {
-        status: 'ok',
-        db_pool: 'idle',
-        model_loaded: isModelLoaded(),
-        sessions: getActiveSessions(),
-        uptime_s: Math.floor(process.uptime()),
-      }
-    }
-
-    const result = await probe()
-    const sessions = getActiveSessions()
-    const uptime_s = Math.floor(process.uptime())
-
-    if (result.ok) {
-      return {
-        status: 'ok',
-        notes: result.notes,
-        db_pool: 'active',
-        model_loaded: isModelLoaded(),
-        sessions,
-        uptime_s,
-      }
-    } else {
-      set.status = 503
-      return {
-        status: 'degraded',
-        db: 'down',
-        model_loaded: isModelLoaded(),
-        sessions,
-        uptime_s,
-        error: 'base de datos no disponible',
-      }
+  app.get('/health', () => {
+    return {
+      status: 'ok',
+      db_pool: isPoolIdle() ? 'idle' : 'active',
+      model_loaded: isModelLoaded(),
+      sessions: getActiveSessions(),
+      uptime_s: Math.floor(process.uptime()),
     }
   })
 
-  app.all('/mcp', ({ request }) => handleMcpRequest(request, prisma))
+  app.all('/mcp', ({ request }) => handleMcpRequest(request, db))
 
   app.get(
     '/api/search',
@@ -79,7 +54,7 @@ export function createApp(opts: AppOptions = {}): Elysia {
         ? tagsStr.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
         : undefined
       return hybridSearch(
-        prisma,
+        db,
         q,
         {
           app: appFilter,
@@ -109,7 +84,7 @@ export function createApp(opts: AppOptions = {}): Elysia {
   app.get('/api/apps', async () => {
     const config = getAppConfig()
     return {
-      apps: await countNotesByApp(prisma),
+      apps: await countNotesByApp(db),
       vocabulary: {
         canonicas: [...new Set([...config.apps, GENERAL_APP])],
         modo: config.mode,
@@ -120,7 +95,7 @@ export function createApp(opts: AppOptions = {}): Elysia {
 
   app.get('/api/notes/:id', async ({ params: { id }, set }) => {
     try {
-      return await readNote(prisma, id)
+      return await readNote(db, id)
     } catch (err) {
       if (err instanceof NotFoundError) {
         set.status = 404
@@ -136,14 +111,14 @@ export function createApp(opts: AppOptions = {}): Elysia {
   app.delete('/api/*', ({ set }) => { set.status = 405; return { error: 'Escritura no permitida. Usa /mcp.' } })
 
   app.get('/', async ({ set }) => {
-    const notes = await listNotes(prisma)
+    const notes = await listNotes(db)
     set.headers['Content-Type'] = 'text/html; charset=utf-8'
     return renderNoteList(notes)
   })
 
   app.get('/notes/:id', async ({ params: { id }, set }) => {
     try {
-      const note = await readNote(prisma, id)
+      const note = await readNote(db, id)
       set.headers['Content-Type'] = 'text/html; charset=utf-8'
       return await renderNote(note)
     } catch (err) {
